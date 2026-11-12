@@ -1,0 +1,42 @@
+#!/usr/bin/env python3
+# server.py — тот же сервер, если нет Node.js
+import http.server, socketserver, json, sys, time, os, socketserver
+
+PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 8787
+HOST = '127.0.0.1'
+ROOT = os.path.dirname(os.path.abspath(__file__))
+ACTIVE_MS = 90.0
+last_ping = [0.0]
+
+class Handler(http.server.SimpleHTTPRequestHandler):
+    def translate_path(self, path):
+        if path in ('', '/'):
+            path = '/index.html'
+        return super().translate_path(path)
+
+    def do_GET(self):
+        if self.path == '/api/ping':
+            last_ping[0] = time.time()
+            self.send_response(200); self.send_header('Content-Type', 'text/plain')
+            self.end_headers(); self.wfile.write(b'ok'); return
+        if self.path == '/api/status':
+            active = (time.time() - last_ping[0]) < ACTIVE_MS
+            body = json.dumps({'active': active, 'lastPing': last_ping[0]}).encode()
+            self.send_response(200); self.send_header('Content-Type', 'application/json')
+            self.send_header('Content-Length', str(len(body)))
+            self.end_headers(); self.wfile.write(body); return
+        return super().do_GET()
+
+    def log_message(self, fmt, *args):
+        sys.stderr.write('[server] ' + (fmt % args) + '\n')
+
+os.chdir(ROOT)
+Handler.extensions_map.update({
+    '.js':'application/javascript', '.mjs':'application/javascript',
+    '.sf2':'application/octet-stream', '.sf3':'application/octet-stream',
+    '.mid':'audio/midi', '.midi':'audio/midi', '.wasm':'application/wasm',
+})
+socketserver.ThreadingTCPServer.allow_reuse_address = True
+with socketserver.ThreadingTCPServer((HOST, PORT), Handler) as httpd:
+    print(f'[server] http://{HOST}:{PORT}/')
+    httpd.serve_forever()

@@ -1,0 +1,162 @@
+// js/ui/transport.js | 5.4 KB | 2026-11-12 21:01:39
+
+import { getSeq, resumeAudio } from '../core/synth.js';
+import { getSeq, getSongDuration, resumeAudio } from '../core/synth.js';
+import { log } from '../core/log.js';
+
+const fmt = s => {
+    if (!isFinite(s) || s < 0) s = 0;
+    const m = Math.floor(s / 60);
+    return `${m}:${Math.floor(s - m * 60).toString().padStart(2, '0')}`;
+};
+
+export class Transport {
+    state = 'stopped';
+    rafId = null;
+    seekActive = false;
+
+    constructor({ playBtn, pauseBtn, stopBtn, timeEl, totalEl, progressEl, progressFill }) {
+        Object.assign(this, { playBtn, pauseBtn, stopBtn, timeEl, totalEl, progressEl, progressFill });
+        this._bind();
+        this._render();
+    }
+
+    _bind() {
+        this.playBtn?.addEventListener('click', e => {
+            e.preventDefault();
+            this._togglePlay();
+        });
+        this.pauseBtn?.addEventListener('click', e => {
+            e.preventDefault();
+            this._togglePause();
+        });
+        this.stopBtn?.addEventListener('click', e => {
+            e.preventDefault();
+            this._stop();
+        });
+
+        if (this.progressEl) {
+            const seekFromClientX = clientX => {
+                const seq = getSeq();
+                if (!seq || !seq.duration) return;
+                const r = this.progressEl.getBoundingClientRect();
+                const ratio = Math.max(0, Math.min(1, (clientX - r.left) / r.width));
+                // В 4.x currentTime можно присваивать — это официальный seek.
+                seq.currentTime = ratio * seq.duration;
+                this._render();
+            };
+
+            this.progressEl.addEventListener('pointerdown', e => {
+                this.seekActive = true;
+                this.progressEl.setPointerCapture?.(e.pointerId);
+                seekFromClientX(e.clientX);
+            });
+            this.progressEl.addEventListener('pointermove', e => {
+                if (this.seekActive) seekFromClientX(e.clientX);
+            });
+            const end = e => {
+                if (!this.seekActive) return;
+                this.seekActive = false;
+                try { this.progressEl.releasePointerCapture?.(e.pointerId); } catch {}
+            };
+            this.progressEl.addEventListener('pointerup', end);
+            this.progressEl.addEventListener('pointercancel', end);
+        }
+    }
+
+    async _togglePlay() {
+        const seq = getSeq();
+        if (!seq) return;
+
+        // Если трек уже доигран — начинаем с нуля.
+        if (this.state === 'stopped' || seq.isFinished) {
+            seq.currentTime = 0;
+        }
+
+        if (seq.paused) {
+            await resumeAudio();
+            seq.play();
+        } else if (this.state === 'stopped' || this.state === 'paused') {
+            await resumeAudio();
+            seq.play();
+        }
+        // если уже играет — повторный клик ничего не ломает, просто игнорируем
+        this._sync('playing');
+        this._tick();
+    }
+
+    async _togglePause() {
+        const seq = getSeq();
+        if (!seq || this.state === 'stopped') return;
+
+        if (seq.paused) {
+            await resumeAudio();
+            seq.play();
+            this._sync('playing');
+            this._tick();
+        } else {
+            seq.pause();
+            this._sync('paused');
+            this._render();
+        }
+    }
+
+    _stop() {
+        const seq = getSeq();
+        if (!seq) return;
+        seq.pause();
+        seq.currentTime = 0;
+        this._sync('stopped');
+        this._render();
+    }
+
+    reset() { this._sync('stopped'); this._render(); }
+
+    _sync(state) {
+        this.state = state;
+
+        // ВАЖНО: никакого `disabled`. Только aria + CSS-класс.
+        const set = (btn, active) => {
+            if (!btn) return;
+            btn.setAttribute('aria-disabled', active ? 'false' : 'true');
+            btn.classList.toggle('is-inactive', !active);
+        };
+        set(this.playBtn,  state !== 'playing');
+        set(this.pauseBtn, state !== 'stopped');
+        set(this.stopBtn,  state !== 'stopped');
+
+        if (this.pauseBtn) {
+            this.pauseBtn.textContent = state === 'paused' ? 'Resume' : 'Pause';
+        }
+    }
+
+    _tick() {
+        if (this.rafId) cancelAnimationFrame(this.rafId);
+        const loop = () => {
+            const seq = getSeq();
+            if (!seq) return;
+            this._render();
+            if (seq.isFinished) {
+                this._sync('stopped');
+                return;
+            }
+            // Пока идёт перемотка — не крутим RAF, чтобы не дёргать currentTime.
+            if (!this.seekActive && this.state === 'playing') {
+                this.rafId = requestAnimationFrame(loop);
+            }
+        };
+        this.rafId = requestAnimationFrame(loop);
+    }
+
+    _render() {
+        const seq = getSeq();
+        if (!seq) return;
+        const dur = getSongDuration() || 0;
+        const cur = Math.min(seq.currentTime || 0, dur);
+        if (this.timeEl)  this.timeEl.textContent  = fmt(cur);
+        if (this.totalEl) this.totalEl.textContent = fmt(dur);
+        if (this.progressFill) {
+            this.progressFill.style.width = (dur > 0 ? (cur / dur) * 100 : 0) + '%';
+        }
+    }
+}

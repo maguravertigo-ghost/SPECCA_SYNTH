@@ -1,0 +1,10 @@
+@REM stop.bat | 185 B | 2026-11-12 19:14:05
+
+@echo off
+taskkill /FI "WINDOWTITLE eq MIDI Player Server*" /T /F >nul 2>nul
+if errorlevel 1 (
+    echo  [i] Server is not running.
+) else (
+    echo  [+] Server stopped.
+)
+pause

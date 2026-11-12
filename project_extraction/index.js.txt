@@ -1,0 +1,24 @@
+// js/editor/index.js | 918 B | 2026-11-12 19:25:48
+
+// Editor module foundation.
+// See ./README.md for the full roadmap. This file exposes an empty shell
+// that future editor modules (piano roll, step grid, mixer, etc.) will mount into.
+
+export function mountEditor(rootEl) {
+    if (!rootEl) return null;
+    rootEl.innerHTML = `
+        <div class="editor-shell">
+            <div class="editor-toolbar">
+                <span class="editor-title">Editor</span>
+                <span class="editor-hint">(foundation — modules will appear here)</span>
+            </div>
+            <div class="editor-canvas" id="editorCanvas">
+                <div class="editor-placeholder">
+                    Editor canvas<br>
+                    <small>Next: piano roll / step grid / pattern list / mixer</small>
+                </div>
+            </div>
+        </div>
+    `;
+    return { root: rootEl, canvas: rootEl.querySelector('#editorCanvas') };
+}

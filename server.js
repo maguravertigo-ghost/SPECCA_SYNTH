@@ -1,0 +1,72 @@
+// server.js — tiny HTTP server. Writes the chosen port to port.txt.
+const http = require('http');
+const fs   = require('fs');
+const path = require('path');
+
+const PREFERRED = parseInt(process.argv[2] || '8787', 10);
+const HOST = '127.0.0.1';
+const ROOT = __dirname;
+const PORT_FILE = path.join(ROOT, 'port.txt');
+
+const MIME = {
+  '.html':'text/html; charset=utf-8', '.htm':'text/html; charset=utf-8',
+  '.js':'text/javascript; charset=utf-8', '.mjs':'text/javascript; charset=utf-8',
+  '.css':'text/css; charset=utf-8', '.json':'application/json; charset=utf-8',
+  '.mid':'audio/midi', '.midi':'audio/midi', '.rmi':'audio/midi',
+  '.sf2':'application/octet-stream', '.sf3':'application/octet-stream',
+  '.dls':'application/octet-stream', '.wasm':'application/wasm',
+  '.png':'image/png', '.jpg':'image/jpeg', '.svg':'image/svg+xml', '.ico':'image/x-icon',
+};
+
+try { if (fs.existsSync(PORT_FILE)) fs.unlinkSync(PORT_FILE); } catch {}
+
+const server = http.createServer((req, res) => {
+  const urlPath = decodeURIComponent((req.url || '/').split('?')[0]);
+  const rel = urlPath === '/' ? 'index.html' : urlPath.replace(/^\/+/, '');
+  const filePath = path.normalize(path.join(ROOT, rel));
+
+  if (!filePath.startsWith(ROOT + path.sep) && filePath !== ROOT) {
+    res.writeHead(403); return res.end('403');
+  }
+
+  fs.stat(filePath, (err, stat) => {
+    if (err || !stat.isFile()) { res.writeHead(404); return res.end('404 ' + rel); }
+    const ext = path.extname(filePath).toLowerCase();
+    const range = req.headers.range;
+
+    if (range && /^bytes=/.test(range)) {
+      const [s, e] = range.replace(/^bytes=/, '').split('-');
+      const start = s ? parseInt(s, 10) : 0;
+      const end   = e ? Math.min(parseInt(e, 10), stat.size - 1) : stat.size - 1;
+      if (start >= stat.size || end < start) {
+        res.writeHead(416, { 'Content-Range': `bytes */${stat.size}` }); return res.end();
+      }
+      res.writeHead(206, {
+        'Content-Type': MIME[ext] || 'application/octet-stream',
+        'Content-Length': end - start + 1,
+        'Content-Range': `bytes ${start}-${end}/${stat.size}`,
+        'Accept-Ranges': 'bytes', 'Cache-Control': 'no-cache',
+      });
+      return fs.createReadStream(filePath, { start, end }).pipe(res);
+    }
+
+    res.writeHead(200, {
+      'Content-Type': MIME[ext] || 'application/octet-stream',
+      'Content-Length': stat.size,
+      'Accept-Ranges': 'bytes', 'Cache-Control': 'no-cache',
+    });
+    fs.createReadStream(filePath).pipe(res);
+  });
+});
+
+function tryListen(port, attempt = 0) {
+  server.once('error', (e) => {
+    if (e.code === 'EADDRINUSE' && attempt < 20) return tryListen(port + 1, attempt + 1);
+    console.error('[server] fatal:', e); process.exit(1);
+  });
+  server.listen(port, HOST, () => {
+    fs.writeFileSync(PORT_FILE, String(port), 'utf8');
+    console.log(`[server] http://${HOST}:${port}/`);
+  });
+}
+tryListen(PREFERRED);

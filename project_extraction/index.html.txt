@@ -1,0 +1,69 @@
+<!-- index.html | 2.4 KB | 2026-11-12 19:24:31 -->
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MIDI Player &amp; Editor</title>
+    <link rel="stylesheet" href="./css/app.css">
+</head>
+<body>
+    <header class="app-header">
+        <span class="app-title">MIDI Player</span>
+        <span id="status" class="app-status">Initializing...</span>
+    </header>
+
+    <div class="app-body">
+        <aside class="playlist-panel">
+            <div class="panel-header">
+                <span>Playlist</span>
+                <div class="panel-actions">
+                    <button id="addFilesBtn" class="btn btn-primary">+ Add</button>
+                    <button id="clearUserTracksBtn" class="btn btn-ghost" title="Remove user tracks">Clear</button>
+                    <input id="fileInput" type="file" multiple
+                           accept=".mid,.midi,.rmi,.xmf,.mod,.s3m,.xm,.it" hidden>
+                </div>
+            </div>
+            <div id="playlistItems" class="playlist-items"></div>
+        </aside>
+
+        <main class="editor-panel">
+            <div id="editorRoot" class="editor-root"></div>
+        </main>
+    </div>
+
+    <div class="transport">
+        <div class="transport-buttons">
+            <button id="playBtn" class="btn btn-play" disabled>▶</button>
+            <button id="pauseBtn" class="btn" disabled>Pause</button>
+            <button id="stopBtn" class="btn" disabled>Stop</button>
+        </div>
+        <div class="transport-time">
+            <span id="timeNow">0:00</span>
+            <span class="time-sep">/</span>
+            <span id="timeTotal">0:00</span>
+        </div>
+        <div id="progressBar" class="progress-bar">
+            <div id="progressFill" class="progress-fill"></div>
+        </div>
+    </div>
+
+    <div class="init-bar" id="initBar" style="display:none">
+        <div id="initFill" class="init-fill"></div>
+    </div>
+
+    <section id="logPanel" class="log-panel">
+        <div class="log-header">
+            <span>Log</span>
+            <div>
+                <button id="copyBtn" class="btn btn-ghost">Copy</button>
+                <button id="toggleLogBtn" class="btn btn-ghost">Toggle</button>
+            </div>
+        </div>
+        <div id="logBox" class="log-box"></div>
+    </section>
+
+    <script type="module" src="./js/main.js"></script>
+</body>
+</html>

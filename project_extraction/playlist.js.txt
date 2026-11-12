@@ -1,0 +1,145 @@
+// js/playlist.js | 4.8 KB | 2026-11-12 19:25:13
+
+// Playlist model + persistence.
+// Metadata (name/order)  -> localStorage
+// MIDI blobs (user files)-> IndexedDB
+import { log } from './core/log.js';
+
+const DB_NAME = 'midi-player';
+const DB_VERSION = 1;
+const STORE = 'tracks';
+const LS_KEY = 'midi-player.playlist.v1';
+
+let dbPromise = null;
+
+function openDB() {
+    if (dbPromise) return dbPromise;
+    dbPromise = new Promise((resolve, reject) => {
+        const req = indexedDB.open(DB_NAME, DB_VERSION);
+        req.onupgradeneeded = () => {
+            const db = req.result;
+            if (!db.objectStoreNames.contains(STORE)) {
+                db.createObjectStore(STORE, { keyPath: 'id' });
+            }
+        };
+        req.onsuccess = () => resolve(req.result);
+        req.onerror   = () => reject(req.error);
+    });
+    return dbPromise;
+}
+
+async function idbPut(record) {
+    const db = await openDB();
+    return new Promise((res, rej) => {
+        const tx = db.transaction(STORE, 'readwrite');
+        tx.objectStore(STORE).put(record);
+        tx.oncomplete = res; tx.onerror = () => rej(tx.error);
+    });
+}
+async function idbDelete(id) {
+    const db = await openDB();
+    return new Promise((res, rej) => {
+        const tx = db.transaction(STORE, 'readwrite');
+        tx.objectStore(STORE).delete(id);
+        tx.oncomplete = res; tx.onerror = () => rej(tx.error);
+    });
+}
+async function idbGet(id) {
+    const db = await openDB();
+    return new Promise((res, rej) => {
+        const tx = db.transaction(STORE, 'readonly');
+        const req = tx.objectStore(STORE).get(id);
+        req.onsuccess = () => res(req.result);
+        req.onerror   = () => rej(req.error);
+    });
+}
+
+const makeId = () =>
+    'trk_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
+
+export class Playlist {
+    items = [];
+    listeners = new Set();
+
+    subscribe(fn) { this.listeners.add(fn); return () => this.listeners.delete(fn); }
+    emit() { for (const fn of this.listeners) fn(this.items); }
+
+    saveMeta() {
+        const meta = this.items.map(({ id, name, source, url, addedAt, size }) =>
+            ({ id, name, source, url, addedAt, size }));
+        try { localStorage.setItem(LS_KEY, JSON.stringify(meta)); }
+        catch (e) { log('Playlist save failed: ' + e, 'warn'); }
+    }
+
+    async load() {
+        let meta = [];
+        try {
+            const raw = localStorage.getItem(LS_KEY);
+            if (raw) meta = JSON.parse(raw);
+        } catch {}
+
+        if (!Array.isArray(meta) || meta.length === 0) {
+            meta = [{
+                id: 'bundled-demo',
+                name: 'demo.mid',
+                source: 'bundled',
+                url: './demo.mid',
+                addedAt: Date.now(),
+                size: null,
+            }];
+        }
+        this.items = meta;
+        this.emit();
+        this.saveMeta();
+        return this.items;
+    }
+
+    async addFiles(fileList) {
+        const added = [];
+        for (const file of fileList) {
+            if (!/\.(mid|midi|rmi|xmf|mod|s3m|xm|it)$/i.test(file.name)) {
+                log(`Skipped (unsupported): ${file.name}`, 'warn');
+                continue;
+            }
+            const id = makeId();
+            const buffer = await file.arrayBuffer();
+            const record = {
+                id, name: file.name, source: 'user',
+                blob: new Blob([buffer], { type: 'audio/midi' }),
+                addedAt: Date.now(), size: buffer.byteLength,
+            };
+            try { await idbPut(record); }
+            catch (e) { log('IndexedDB write failed: ' + e, 'warn'); continue; }
+            const meta = { id, name: file.name, source: 'user', addedAt: record.addedAt, size: record.size };
+            this.items.push(meta);
+            added.push(meta);
+            log(`Added: ${file.name} (${(file.size / 1024).toFixed(1)} KB)`);
+        }
+        if (added.length) { this.saveMeta(); this.emit(); }
+        return added;
+    }
+
+    async remove(id) {
+        const idx = this.items.findIndex(x => x.id === id);
+        if (idx === -1) return false;
+        const item = this.items[idx];
+        if (item.source === 'user') {
+            try { await idbDelete(id); } catch (e) { log('IDB delete failed: ' + e, 'warn'); }
+        }
+        this.items.splice(idx, 1);
+        this.saveMeta();
+        this.emit();
+        return true;
+    }
+
+    async getBuffer(item) {
+        if (item.source === 'bundled') {
+            const r = await fetch(item.url);
+            if (!r.ok) throw new Error(`HTTP ${r.status} for ${item.url}`);
+            return await r.arrayBuffer();
+        }
+        const rec = await idbGet(item.id);
+        if (!rec?.blob) throw new Error(`Track data for "${item.name}" not found`);
+        return await rec.blob.arrayBuffer();
+    }
+}
