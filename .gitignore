@@ -1,0 +1,11 @@
+# Большие бинарные файлы
+soundfont.sf2
+*.sf2
+*.sf3
+
+# Зависимости и временные файлы
+node_modules/
+supermium-profile/
+port.txt
+server.log
+*.log
