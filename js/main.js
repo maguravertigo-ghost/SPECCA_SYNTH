@@ -14,23 +14,23 @@ const $ = id => document.getElementById(id);
     const playlist = new Playlist();
     await playlist.load();
 
-    const transport = new Transport({
-        playBtn: $('playBtn'), pauseBtn: $('pauseBtn'), stopBtn: $('stopBtn'),
-        timeEl: $('timeNow'), totalEl: $('timeTotal'),
-        progressEl: $('progressBar'), progressFill: $('progressFill'),
-    });
+    let editor = null;  // ← объявляем заранее
+
+	const transport = new Transport({
+		playBtn: $('playBtn'), pauseBtn: $('pauseBtn'), stopBtn: $('stopBtn'),
+		timeEl: $('timeNow'), totalEl: $('timeTotal'),
+		progressEl: $('progressBar'), progressFill: $('progressFill'),
+		onPlayStart: () => editor?.stop(),   // было getPlayback()?.stop(), стало так
+		onStop:      () => editor?.stop(),   // ← новая строка
+	});
 
     const view = new PlaylistView(
-        {
-            listEl: $('playlistItems'),
-            addBtn: $('addFilesBtn'),
-            fileInput: $('fileInput'),
-            clearBtn: $('clearUserTracksBtn'),
-        },
+        { listEl: $('playlistItems'), addBtn: $('addFilesBtn'), fileInput: $('fileInput'), clearBtn: $('clearUserTracksBtn') },
         playlist,
         {
             onSelect: async item => {
                 try {
+                    editor?.stop();   // ← было editor?.getPlayback()?.stop()
                     setStatus(`Loading "${item.name}"...`);
                     const buf = await playlist.getBuffer(item);
                     await loadSong(buf, item.name);
@@ -56,7 +56,11 @@ const $ = id => document.getElementById(id);
         });
         if (initBar) initBar.style.display = 'none';
 		
-		mountEditor($('editorRoot'));
+		editor = mountEditor($('editorRoot'), {
+			playlist,
+			getActiveId: () => view.activeId,
+			onEditorStart: () => transport.reset(),
+		});
 		
         if (playlist.items.length > 0) {
             const first = playlist.items[0];

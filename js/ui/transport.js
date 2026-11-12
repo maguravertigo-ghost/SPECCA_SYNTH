@@ -12,11 +12,11 @@ export class Transport {
     rafId = null;
     seekActive = false;
 
-    constructor({ playBtn, pauseBtn, stopBtn, timeEl, totalEl, progressEl, progressFill }) {
-        Object.assign(this, { playBtn, pauseBtn, stopBtn, timeEl, totalEl, progressEl, progressFill });
-        this._bind();
-        this._render();
-    }
+	constructor({ playBtn, pauseBtn, stopBtn, timeEl, totalEl, progressEl, progressFill, onPlayStart, onStop }) {
+		Object.assign(this, { playBtn, pauseBtn, stopBtn, timeEl, totalEl, progressEl, progressFill, onPlayStart, onStop });
+		this._bind();
+		this._render();
+	}
 
     _bind() {
         this.playBtn?.addEventListener('click', e => { e.preventDefault(); this._togglePlay(); });
@@ -52,21 +52,21 @@ export class Transport {
         }
     }
 
-    async _togglePlay() {
-        const seq = getSeq();
-        if (!seq) return;
-        if (this.state === 'playing') return;
+	async _togglePlay() {
+		const seq = getSeq();
+		if (!seq) return;
+		if (this.state === 'playing') return;
 
-        await resumeAudio();
+		await resumeAudio();
+		this.onPlayStart?.();   // ← новая строка
 
-        if (this.state === 'stopped' || seq.isFinished) {
-            try { seq.currentTime = 0; } catch {}
-        }
-
-        seq.play();
-        this._sync('playing');
-        this._tick();
-    }
+		if (this.state === 'stopped' || seq.isFinished) {
+			try { seq.currentTime = 0; } catch {}
+		}
+		seq.play();
+		this._sync('playing');
+		this._tick();
+	}
 
     async _togglePause() {
         const seq = getSeq();
@@ -87,6 +87,7 @@ export class Transport {
     _stop() {
         const seq = getSeq();
         if (!seq) return;
+		this.onStop?.();                   // ← новая строка
         seq.pause();
         try { seq.currentTime = 0; } catch {}
         this._sync('stopped');

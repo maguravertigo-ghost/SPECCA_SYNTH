@@ -118,7 +118,6 @@ export class Playback {
         try {
             for (const ch of this.sequence.channels) {
                 this.synth.controllerChange(ch.channel, 123, 0); // all notes off
-                this.synth.controllerChange(ch.channel, 120, 0); // all sound off
             }
         } catch (e) { console.warn('[playback] allOff failed', e); }
     }
