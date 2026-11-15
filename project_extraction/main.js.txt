@@ -1,84 +1,338 @@
-// js/main.js | 2.8 KB | 2026-11-12 19:26:06
+// js/main.js | 12.2 KB | 2026-11-13 22:09:49
 
+// js/main.js
 import { log, setStatus, wireGlobalErrorHandlers } from './core/log.js';
-import { initSynth, loadSong } from './core/synth.js';
+import { initSynth, getSynth, getAudioContext } from './core/synth.js';
 import { Playlist } from './playlist.js';
-import { Transport } from './ui/transport.js';
-import { PlaylistView } from './ui/playlistView.js';
-import { mountEditor } from './editor/index.js';
+import { mountPlaylistView } from './ui/playlistView.js';
+import { mountMenubar } from './ui/menubar.js';
+import { mountPlayerOverlay } from './ui/playerOverlay.js';
+import { mountPianoRoll } from './editor/pianoRoll.js';
+import { importMidi } from './editor/importMidi.js';
+import { writeMIDIFromSequence } from './editor/exportMidi.js';
+import { Sequence } from './editor/sequence.js';
 
 wireGlobalErrorHandlers();
-const $ = id => document.getElementById(id);
 
-(async function boot() {
-    log('=== Boot (modular) ===');
+// ---------------- Playlist ----------------
+const playlist = new Playlist();
+const playlistItemsEl = document.getElementById('playlistItems');
 
-    const playlist = new Playlist();
-    await playlist.load();
-
-    const transport = new Transport({
-        playBtn: $('playBtn'), pauseBtn: $('pauseBtn'), stopBtn: $('stopBtn'),
-        timeEl: $('timeNow'), totalEl: $('timeTotal'),
-        progressEl: $('progressBar'), progressFill: $('progressFill'),
-    });
-
-    const view = new PlaylistView(
-        {
-            listEl: $('playlistItems'),
-            addBtn: $('addFilesBtn'),
-            fileInput: $('fileInput'),
-            clearBtn: $('clearUserTracksBtn'),
-        },
+let playlistView = null;
+if (playlistItemsEl) {
+    playlistView = mountPlaylistView(playlistItemsEl, {
         playlist,
-        {
-            onSelect: async item => {
-                try {
-                    setStatus(`Loading "${item.name}"...`);
-                    const buf = await playlist.getBuffer(item);
-                    await loadSong(buf, item.name);
-                    view.setActive(item.id);
-                    transport.reset();
-                    setStatus(`Ready: ${item.name}`);
-                } catch (e) {
-                    log(`Load failed: ${e.message}`, 'error');
-                    setStatus('Load failed');
-                }
-            },
+        getActiveId: () => playlist.getActiveId?.(),
+        onSelect: async (item) => loadTrackIntoEditor(item),
+        onRemove: (id) => {
+            playlist.removeUserTrack?.(id);
+            playlistView?.refresh?.();
         },
-    );
+    });
+}
 
-    mountEditor($('editorRoot'));
+// ---------------- Audio unlock ----------------
+const unlockEl = document.getElementById('audioUnlock');
+unlockEl?.addEventListener('click', async () => {
+    window.__userGesture = true;
+    unlockEl.classList.add('hidden');
+    try { await bootAudio(); }
+    catch (err) { log(`audio unlock failed: ${err}`, 'error'); }
+});
+document.addEventListener('pointerdown', () => { window.__userGesture = true; }, { once: true });
 
-    const initBar  = $('initBar');
-    const initFill = $('initFill');
+// ---------------- Editor state ----------------
+let pianoRoll = null;
+let currentSequence = null;
+let lastLoadedName = null;
+
+const createEmptySequence = () => {
+    const seq = Sequence.create();
+    seq.name = 'Untitled';
+    seq.tempo = 120;
+    seq.timeDivision = 480;
+    seq.channels = [];
+    for (let ch = 0; ch < 16; ch++) {
+        seq.channels.push({
+            channel: ch,
+            program: 0,
+            isDrum: ch === 9,
+            volume: 100,
+            pan: 64,
+        });
+    }
+    if (!seq.patterns || seq.patterns.length === 0) {
+        const pattern = seq.addPattern({ name: 'Pattern 1', lengthTicks: 480 * 4 });
+        seq.placePattern(pattern.id, 0);
+    }
+    return seq;
+};
+
+const ensureSequence = () => {
+    if (!currentSequence) {
+        currentSequence = createEmptySequence();
+        pianoRoll?.refresh();
+    }
+    return currentSequence;
+};
+
+async function loadTrackIntoEditor(item) {
+    if (!item) return;
+    try {
+        setStatus(`Loading ${item.name}…`);
+        const buffer = await playlist.getBuffer(item);
+        lastLoadedName = item.name;
+        const seq = importMidi(buffer, item.name);
+        currentSequence = seq;
+        const totalNotes = seq.patterns.reduce((s, p) => s + (p.notes?.length || 0), 0);
+        log(`main: imported "${item.name}" — ${totalNotes} notes, ${seq.patterns.length} patterns @ ${seq.tempo} BPM`);
+        pianoRoll?.refresh();
+        setStatus(`Loaded: ${item.name}`);
+    } catch (err) {
+        log(`import failed: ${err}`, 'error');
+        setStatus('Load failed');
+    }
+}
+
+async function bootAudio() {
+    setStatus('Loading soundfont…');
+    const initBar  = document.getElementById('initBar');
+    const initFill = document.getElementById('initFill');
     if (initBar) initBar.style.display = 'block';
 
-    try {
-        await initSynth({
-            onProgress: p => { if (initFill) initFill.style.width = (p * 100).toFixed(0) + '%'; },
+    await initSynth({
+        onProgress: (p) => {
+            if (initFill) initFill.style.width = `${Math.round(p * 100)}%`;
+        },
+    });
+
+    const ctx = getAudioContext();
+    if (!ctx) throw new Error('AudioContext unavailable');
+
+    setStatus('Ready');
+    if (initBar) initBar.style.display = 'none';
+
+    const first = playlist.items?.[0];
+    if (first) await loadTrackIntoEditor(first);
+    else ensureSequence();
+}
+
+// ---------------- Piano roll ----------------
+const editorRoot = document.getElementById('editorRoot');
+if (editorRoot) {
+    pianoRoll = mountPianoRoll(editorRoot, {
+        getSequence:          () => currentSequence,
+        getActivePatternId:   () => currentSequence?.patterns?.[0]?.id,
+        onNoteChange:         () => {},
+        onRequestNewSequence: () => ensureSequence(),
+    });
+}
+
+// ---------------- Local project save/load ----------------
+const STORAGE_KEY = 'spessa_projects_v1';
+const readProjects = () => {
+    try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {}; }
+    catch { return {}; }
+};
+const writeProjects = (obj) => localStorage.setItem(STORAGE_KEY, JSON.stringify(obj));
+
+const saveProjectToLocal = () => {
+    const seq = currentSequence;
+    if (!seq) { log('Save: nothing to save', 'warn'); return; }
+    const name = prompt('Project name:', lastLoadedName || 'My Loop');
+    if (!name) return;
+    const projects = readProjects();
+    projects[name] = {
+        seq: {
+            name: seq.name,
+            tempo: seq.tempo,
+            timeDivision: seq.timeDivision,
+            channels: seq.channels?.map(c => ({ ...c })),
+            patterns: seq.patterns?.map(p => ({
+                id: p.id, name: p.name, lengthTicks: p.lengthTicks,
+                notes: (p.notes || []).map(n => ({ ...n })),
+            })),
+            placements: seq.placements?.map?.(x => ({ ...x })) || [],
+        },
+        timestamp: Date.now(),
+    };
+    writeProjects(projects);
+    log(`main: project saved "${name}"`);
+    setStatus(`Saved: ${name}`);
+};
+
+const openProjectDialog = () => {
+    const projects = readProjects();
+    const names = Object.keys(projects);
+    if (!names.length) { log('Open: no saved projects', 'warn'); return; }
+
+    const overlay = document.createElement('div');
+    overlay.className = 'pr-picker-overlay';
+    overlay.innerHTML = `
+        <div class="pr-picker-box">
+            <div class="pr-picker-title">Open Project</div>
+            <div class="pr-picker-list" id="projList"></div>
+            <button class="btn btn-primary pr-picker-close" id="projCancel" type="button">Cancel</button>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+    overlay.querySelector('#projCancel').addEventListener('click', () => overlay.remove());
+
+    const list = overlay.querySelector('#projList');
+    names.forEach((n) => {
+        const item = document.createElement('button');
+        item.type = 'button';
+        item.className = 'pr-picker-item';
+        item.textContent = n;
+        item.addEventListener('click', () => {
+            const seq = Sequence.create();
+            const s = projects[n].seq;
+            seq.name = s.name || n;
+            seq.tempo = s.tempo || 120;
+            seq.timeDivision = s.timeDivision || 480;
+            seq.channels = (s.channels || []).map(c => ({ ...c }));
+            seq.patterns = (s.patterns || []).map(p => ({ ...p, notes: (p.notes || []).map(x => ({ ...x })) }));
+            seq.placements = (s.placements || []).map(x => ({ ...x }));
+            currentSequence = seq;
+            pianoRoll?.refresh();
+            lastLoadedName = n;
+            overlay.remove();
+            log(`main: project loaded "${n}"`);
+            setStatus(`Loaded: ${n}`);
         });
-        if (initBar) initBar.style.display = 'none';
+        list.appendChild(item);
+    });
+};
 
-        if (playlist.items.length > 0) {
-            const first = playlist.items[0];
-            const buf = await playlist.getBuffer(first);
-            await loadSong(buf, first.name);
-            view.setActive(first.id);
-            transport.reset();
+// ---------------- Menubar ----------------
+const menubar = mountMenubar({
+    new: () => {
+        log('Menu: New');
+        currentSequence = createEmptySequence();
+        lastLoadedName = null;
+        pianoRoll?.refresh();
+        setStatus('New project');
+    },
+    open: () => {
+        log('Menu: Open MIDI…');
+        const input = document.getElementById('fileInput');
+        if (!input) return;
+        input.onchange = async (e) => {
+            const files = Array.from(e.target.files || []);
+            if (!files.length) return;
+            for (const f of files) {
+                try { await playlist.addUserFile?.(f); }
+                catch (err) { log(`Add failed: ${err}`, 'error'); }
+            }
+            playlistView?.refresh?.();
+            const first = playlist.items?.[0];
+            if (first) await loadTrackIntoEditor(first);
+            input.value = '';
+        };
+        input.click();
+    },
+
+    save: saveProjectToLocal,
+    saveAs: () => {
+        log('Menu: Save As MIDI…');
+        if (!currentSequence) { log('Save As: nothing to save', 'warn'); return; }
+        try {
+            const midiBuf = writeMIDIFromSequence(currentSequence, { playMode: 'track', useAnchor: true });
+            const blob = new Blob([midiBuf], { type: 'audio/midi' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            const base = lastLoadedName || currentSequence.name || 'untitled';
+            a.download = base.endsWith('.mid') ? base : `${base}.mid`;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(url);
+            log(`Menu: saved ${a.download} (${midiBuf.byteLength} bytes)`);
+        } catch (err) {
+            log(`Save As failed: ${err}`, 'error');
         }
-        setStatus('Ready');
-    } catch (e) {
-        log('INIT FAILED: ' + e.message, 'error');
-        setStatus('Init failed');
-        return;
-    }
+    },
 
-    $('copyBtn')?.addEventListener('click', async () => {
-        const text = document.getElementById('logBox').textContent;
-        try { await navigator.clipboard.writeText(text); alert('Log copied'); }
-        catch { alert('Copy failed'); }
+    undo: () => log('Menu: Undo (TODO)'),
+    redo: () => log('Menu: Redo (TODO)'),
+    cut:  () => {
+        const sel = pianoRoll?.getSelection?.() || [];
+        if (!sel.length) return;
+        window.__prClipboard = pianoRoll.copySelection();
+        pianoRoll.deleteSelection();
+        log(`Menu: cut ${sel.length} notes`);
+    },
+    copy: () => {
+        const sel = pianoRoll?.getSelection?.() || [];
+        if (!sel.length) return;
+        window.__prClipboard = pianoRoll.copySelection();
+        log(`Menu: copied ${sel.length} notes`);
+    },
+    paste: () => {
+        if (window.__prClipboard?.length) {
+            pianoRoll?.pasteNotes(window.__prClipboard);
+            log(`Menu: pasted ${window.__prClipboard.length} notes`);
+        }
+    },
+    del: () => {
+        const sel = pianoRoll?.getSelection?.() || [];
+        if (sel.length) {
+            pianoRoll.deleteSelection();
+            log(`Menu: deleted ${sel.length} notes`);
+        }
+    },
+
+    openPlayer: () => playerOverlay?.open(),
+    savePlaylist: () => {
+        const items = (playlist.items || []).map(i => ({ name: i.name }));
+        const blob = new Blob([JSON.stringify(items, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = 'playlist.json';
+        document.body.appendChild(a); a.click(); a.remove();
+        URL.revokeObjectURL(url);
+        log('Menu: playlist saved');
+    },
+    clearPlaylist: () => {
+        playlist.clearUserTracks?.();
+        playlistView?.refresh?.();
+        log('Menu: playlist cleared');
+    },
+});
+
+// ---------------- Player overlay ----------------
+const playerOverlay = mountPlayerOverlay({
+    playlist,
+    onSelectTrack: (item) => loadTrackIntoEditor(item),
+    onRequestInit: () => playlistView?.refresh?.(),
+    onLoaded: () => playlistView?.refresh?.(),
+});
+
+// ---------------- Init UI ----------------
+playlistView?.refresh?.();
+
+window.addEventListener('pointerdown', () => {
+    if (window.__userGesture && !getAudioContext()) {
+        bootAudio().catch(err => log(`bootAudio failed: ${err}`, 'error'));
+    }
+}, { once: true });
+
+log('main: shell ready — press anywhere to start audio engine');
+
+// js/main.js — в самом конце
+const srSelect = document.getElementById('sampleRateSelect');
+if (srSelect) {
+    const saved = localStorage.getItem('midi-player.sampleRate') || '44100';
+    srSelect.value = saved;
+    srSelect.addEventListener('change', () => {
+        localStorage.setItem('midi-player.sampleRate', srSelect.value);
+        const ctx = getAudioContext();
+        if (ctx) {
+            log(`Sample rate изменён на ${srSelect.value}. Перезагрузите страницу для применения.`, 'warn');
+            const status = document.getElementById('status');
+            if (status) status.textContent = `SR ${srSelect.value} — reload needed`;
+        }
     });
-    $('toggleLogBtn')?.addEventListener('click', () => {
-        $('logPanel')?.classList.toggle('collapsed');
-    });
-})();
+}

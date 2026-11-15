@@ -1,0 +1,121 @@
+// js/editor/importMidi.js | 4.1 KB | 2026-11-13 00:25:04
+
+// js/editor/importMidi.js
+import { BasicMIDI } from '../../main.min.js';
+import { Sequence } from './sequence.js';
+
+export function importMidi(buffer, name = '') {
+    const midi = BasicMIDI.fromArrayBuffer(buffer, name);
+
+    const seq = Sequence.create();
+    seq.name = name || midi.fileName || 'Imported';
+    seq.timeDivision = midi.timeDivision || 480;
+
+    // Option A: только первый tempo. tempoChanges[last] — это tick 0.
+    // После BasicMIDI.parseInternal массив перевёрнут:
+	// [..., <самый ранний темп файла>, <дефолт 120>]
+	// Нужен темп файла — это второй с конца.
+	const initialTempo = midi.tempoChanges.length >= 2
+		? midi.tempoChanges[midi.tempoChanges.length - 2].tempo
+		: 120;
+    seq.tempo = Math.round(initialTempo);
+
+    // 16 каналов по умолчанию, ch 9 = drums
+    seq.channels = [];
+    for (let ch = 0; ch < 16; ch++) {
+        seq.channels.push({
+            channel: ch,
+            program: 0,
+            isDrum: ch === 9,
+            volume: 100,
+            pan: 64,
+        });
+    }
+
+    const lastTick = Math.max(midi.lastVoiceEventTick, seq.timeDivision * 4);
+    const channelPatterns = new Map();
+    const pendingNotes = new Map(); // channel -> Map(key -> [{key, vel, tick}])
+
+    const ensurePattern = (channel) => {
+        if (channelPatterns.has(channel)) return channelPatterns.get(channel);
+        const p = seq.addPattern({
+            name: channel === 9 ? 'Drums (Ch 10)' : `Ch ${channel + 1}`,
+            lengthTicks: lastTick,
+        });
+        channelPatterns.set(channel, p);
+        return p;
+    };
+
+    const noteOn = (channel, key, vel, tick) => {
+        let map = pendingNotes.get(channel);
+        if (!map) { map = new Map(); pendingNotes.set(channel, map); }
+        let list = map.get(key);
+        if (!list) { list = []; map.set(key, list); }
+        list.push({ key, vel, tick });
+    };
+
+    const noteOff = (channel, key, endTick) => {
+        const map = pendingNotes.get(channel);
+        if (!map) return;
+        const list = map.get(key);
+        if (!list || list.length === 0) return;
+        const start = list.shift();
+        const pattern = ensurePattern(channel);
+        seq.addNote(pattern.id, {
+            track: channel,
+            key: start.key,
+            vel: start.vel,
+            tick: start.tick,
+            dur: Math.max(1, endTick - start.tick),
+        });
+    };
+
+    midi.iterate((event) => {
+        const s = event.statusByte;
+        if (s < 0x80 || s >= 0xF0) return;
+        const type = s & 0xF0;
+        const channel = s & 0x0F;
+
+        if (type === 0x90) {
+            const key = event.data[0];
+            const vel = event.data[1];
+            if (vel === 0) noteOff(channel, key, event.ticks);
+            else           noteOn(channel, key, vel, event.ticks);
+        } else if (type === 0x80) {
+            noteOff(channel, event.data[0], event.ticks);
+        } else if (type === 0xC0) {
+            const ch = seq.channels[channel];
+            if (ch) ch.program = event.data[0];
+        } else if (type === 0xB0) {
+            const cc = event.data[0];
+            const val = event.data[1];
+            const ch = seq.channels[channel];
+            if (!ch) return;
+            if (cc === 7)  ch.volume = val;
+            if (cc === 10) ch.pan    = val;
+        }
+    });
+
+    // Закрыть «висящие» ноты на lastTick
+    for (const [channel, map] of pendingNotes) {
+        for (const [, list] of map) {
+            while (list.length > 0) {
+                const start = list.shift();
+                const pattern = ensurePattern(channel);
+                seq.addNote(pattern.id, {
+                    track: channel,
+                    key: start.key,
+                    vel: start.vel,
+                    tick: start.tick,
+                    dur: Math.max(1, lastTick - start.tick),
+                });
+            }
+        }
+    }
+
+    for (const pattern of channelPatterns.values()) {
+        seq.placePattern(pattern.id, 0);
+    }
+
+    return seq;
+}

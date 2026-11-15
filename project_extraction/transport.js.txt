@@ -1,8 +1,7 @@
-// js/ui/transport.js | 5.4 KB | 2026-11-12 21:01:39
+// js/ui/transport.js | 7.1 KB | 2026-11-13 21:25:49
 
-import { getSeq, resumeAudio } from '../core/synth.js';
+// js/ui/transport.js
 import { getSeq, getSongDuration, resumeAudio } from '../core/synth.js';
-import { log } from '../core/log.js';
 
 const fmt = s => {
     if (!isFinite(s) || s < 0) s = 0;
@@ -15,25 +14,16 @@ export class Transport {
     rafId = null;
     seekActive = false;
 
-    constructor({ playBtn, pauseBtn, stopBtn, timeEl, totalEl, progressEl, progressFill }) {
-        Object.assign(this, { playBtn, pauseBtn, stopBtn, timeEl, totalEl, progressEl, progressFill });
-        this._bind();
-        this._render();
-    }
+	constructor({ playBtn, pauseBtn, stopBtn, timeEl, totalEl, progressEl, progressFill, onPlayStart, onStop }) {
+		Object.assign(this, { playBtn, pauseBtn, stopBtn, timeEl, totalEl, progressEl, progressFill, onPlayStart, onStop });
+		this._bind();
+		this._render();
+	}
 
     _bind() {
-        this.playBtn?.addEventListener('click', e => {
-            e.preventDefault();
-            this._togglePlay();
-        });
-        this.pauseBtn?.addEventListener('click', e => {
-            e.preventDefault();
-            this._togglePause();
-        });
-        this.stopBtn?.addEventListener('click', e => {
-            e.preventDefault();
-            this._stop();
-        });
+        this.playBtn?.addEventListener('click', e => { e.preventDefault(); this._togglePlay(); });
+        this.pauseBtn?.addEventListener('click', e => { e.preventDefault(); this._togglePause(); });
+        this.stopBtn?.addEventListener('click', e => { e.preventDefault(); this._stop(); });
 
         if (this.progressEl) {
             const seekFromClientX = clientX => {
@@ -41,7 +31,6 @@ export class Transport {
                 if (!seq || !seq.duration) return;
                 const r = this.progressEl.getBoundingClientRect();
                 const ratio = Math.max(0, Math.min(1, (clientX - r.left) / r.width));
-                // В 4.x currentTime можно присваивать — это официальный seek.
                 seq.currentTime = ratio * seq.duration;
                 this._render();
             };
@@ -58,32 +47,28 @@ export class Transport {
                 if (!this.seekActive) return;
                 this.seekActive = false;
                 try { this.progressEl.releasePointerCapture?.(e.pointerId); } catch {}
+                if (this.state === 'playing') this._tick();
             };
             this.progressEl.addEventListener('pointerup', end);
             this.progressEl.addEventListener('pointercancel', end);
         }
     }
 
-    async _togglePlay() {
-        const seq = getSeq();
-        if (!seq) return;
+	async _togglePlay() {
+		const seq = getSeq();
+		if (!seq) return;
+		if (this.state === 'playing') return;
 
-        // Если трек уже доигран — начинаем с нуля.
-        if (this.state === 'stopped' || seq.isFinished) {
-            seq.currentTime = 0;
-        }
+		await resumeAudio();
+		this.onPlayStart?.();   // ← новая строка
 
-        if (seq.paused) {
-            await resumeAudio();
-            seq.play();
-        } else if (this.state === 'stopped' || this.state === 'paused') {
-            await resumeAudio();
-            seq.play();
-        }
-        // если уже играет — повторный клик ничего не ломает, просто игнорируем
-        this._sync('playing');
-        this._tick();
-    }
+		if (this.state === 'stopped' || seq.isFinished) {
+			try { seq.currentTime = 0; } catch {}
+		}
+		seq.play();
+		this._sync('playing');
+		this._tick();
+	}
 
     async _togglePause() {
         const seq = getSeq();
@@ -104,54 +89,79 @@ export class Transport {
     _stop() {
         const seq = getSeq();
         if (!seq) return;
+		this.onStop?.();                   // ← новая строка
         seq.pause();
-        seq.currentTime = 0;
+        try { seq.currentTime = 0; } catch {}
         this._sync('stopped');
         this._render();
     }
 
-    reset() { this._sync('stopped'); this._render(); }
+    reset() {
+        this._sync('stopped');
+        this._render();
+    }
 
-    _sync(state) {
-        this.state = state;
+	_sync(state) {
+		this.state = state;
+		const set = (btn, active) => {
+			if (!btn) return;
+			btn.disabled = false;            // ← добавить
+			btn.setAttribute('aria-disabled', active ? 'false' : 'true');
+			btn.classList.toggle('is-inactive', !active);
+		};
+		set(this.playBtn,  state !== 'playing');
+		set(this.pauseBtn, state !== 'stopped');
+		set(this.stopBtn,  state !== 'stopped');
+		if (this.pauseBtn) this.pauseBtn.textContent = state === 'paused' ? 'Resume' : 'Pause';
+	}
 
-        // ВАЖНО: никакого `disabled`. Только aria + CSS-класс.
-        const set = (btn, active) => {
-            if (!btn) return;
-            btn.setAttribute('aria-disabled', active ? 'false' : 'true');
-            btn.classList.toggle('is-inactive', !active);
-        };
-        set(this.playBtn,  state !== 'playing');
-        set(this.pauseBtn, state !== 'stopped');
-        set(this.stopBtn,  state !== 'stopped');
+_tick() {
+    if (this.rafId) { cancelAnimationFrame(this.rafId); this.rafId = null; }
+    const loop = () => {
+        const seq = getSeq();
+        if (!seq) { this.rafId = null; return; }
+        this._render();
 
-        if (this.pauseBtn) {
-            this.pauseBtn.textContent = state === 'paused' ? 'Resume' : 'Pause';
+        // Подхватываем внешний play (например, из piano roll):
+        // если seq не на паузе и не завершён, а мы ещё в 'stopped'/'paused' —
+        // переключаемся в 'playing'.
+        if (!this.seekActive && !seq.paused && !seq.isFinished && this.state !== 'playing') {
+            this._sync('playing');
         }
-    }
+        // Подхватываем внешний pause:
+        if (!this.seekActive && seq.paused && this.state === 'playing') {
+            this._sync('paused');
+        }
 
-    _tick() {
-        if (this.rafId) cancelAnimationFrame(this.rafId);
-        const loop = () => {
-            const seq = getSeq();
-            if (!seq) return;
-            this._render();
-            if (seq.isFinished) {
-                this._sync('stopped');
-                return;
-            }
-            // Пока идёт перемотка — не крутим RAF, чтобы не дёргать currentTime.
-            if (!this.seekActive && this.state === 'playing') {
-                this.rafId = requestAnimationFrame(loop);
-            }
-        };
-        this.rafId = requestAnimationFrame(loop);
+        if (seq.isFinished) {
+            this._sync('stopped');
+            this.rafId = null;
+            return;
+        }
+
+        if (!this.seekActive && this.state !== 'stopped') {
+            this.rafId = requestAnimationFrame(loop);
+        } else {
+            this.rafId = null;
+        }
+    };
+    this.rafId = requestAnimationFrame(loop);
+}
+
+// Публичный метод для внешнего «включения» — вызывается из piano roll
+syncExternal() {
+    const seq = getSeq();
+    if (!seq) return;
+    if (!seq.paused && !seq.isFinished) {
+        this._sync('playing');
+        this._tick();
     }
+}
 
     _render() {
         const seq = getSeq();
         if (!seq) return;
-        const dur = getSongDuration() || 0;
+        const dur = getSongDuration();
         const cur = Math.min(seq.currentTime || 0, dur);
         if (this.timeEl)  this.timeEl.textContent  = fmt(cur);
         if (this.totalEl) this.totalEl.textContent = fmt(dur);
@@ -159,4 +169,40 @@ export class Transport {
             this.progressFill.style.width = (dur > 0 ? (cur / dur) * 100 : 0) + '%';
         }
     }
-}
+}
+
+// js/ui/transport.js — дописать в самый конец файла
+
+/**
+ * Удобная обёртка: находит элементы по id и создаёт Transport.
+ * Экспортируется под именем, которое ожидает main.js.
+ */
+export function mountTransport(opts = {}) {
+    const $ = (id) => document.getElementById(id);
+    const {
+        // DOM (можно переопределить, иначе берётся из index.html)
+        playBtn, pauseBtn, stopBtn,
+        timeEl, totalEl, progressEl, progressFill,
+        // Колбэки
+        onPlayStart, onStop,
+        // Устаревшие/на будущее — сейчас игнорируются, но принимаем,
+        // чтобы не менять сигнатуру вызовов в main.js
+        getPlayback: _getPlayback,
+        onSeek: _onSeek,
+    } = opts;
+
+    return new Transport({
+        playBtn:       playBtn       ?? $('playBtn'),
+        pauseBtn:      pauseBtn      ?? $('pauseBtn'),
+        stopBtn:       stopBtn       ?? $('stopBtn'),
+        timeEl:        timeEl        ?? $('timeNow'),
+        totalEl:       totalEl       ?? $('timeTotal'),
+        progressEl:    progressEl    ?? $('progressBar'),
+        progressFill:  progressFill  ?? $('progressFill'),
+        onPlayStart,
+        onStop,
+    });
+}
+
+// На случай старых импортов
+export default Transport;

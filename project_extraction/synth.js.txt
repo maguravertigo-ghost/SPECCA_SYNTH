@@ -1,170 +1,96 @@
-// js/core/synth.js | 6.4 KB | 2026-11-12 21:00:20
+// js/core/synth.js | 3.8 KB | 2026-11-13 22:03:52
 
-import { log, setStatus } from './log.js';
-
-export const SOUNDFONT_URL = '/soundfont.sf2';
-export const WORKLET_URL   = '/spessasynth_processor.v2.js'; // новое имя
-export const BUNDLE_URL    = '/main.min.js';
-
-let synth = null, seq = null, audioContext = null, initialized = false;
-let pendingSongReady = null;
-
-function unlockAudioContext(ctx) {
-    if (ctx.state === 'running') return;
-    const tryResume = () => {
-        ctx.resume().then(() => {
-            if (ctx.state === 'running') {
-                log(`AudioContext unlocked: ${ctx.state}`);
-                cleanup();
-            }
-        }).catch(e => log('AudioContext resume failed: ' + e.message, 'warn'));
-    };
-    const cleanup = () => {
-        ['pointerdown', 'keydown', 'click', 'touchstart'].forEach(ev =>
-            document.removeEventListener(ev, tryResume, true));
-    };
-    ['pointerdown', 'keydown', 'click', 'touchstart'].forEach(ev =>
-        document.addEventListener(ev, tryResume, true));
-}
-
-export async function fetchWithProgress(url, label, onProgress) {
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`${label}: HTTP ${res.status} on ${url}`);
-    const total = parseInt(res.headers.get('content-length') || '0', 10);
-    if (!res.body?.getReader) {
-        const b = await res.arrayBuffer();
-        onProgress?.(1);
-        return b;
-    }
-    const reader = res.body.getReader();
-    const chunks = []; let received = 0;
-    while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        chunks.push(value); received += value.length;
-        if (total) onProgress?.(received / total);
-    }
-    const out = new Uint8Array(received); let off = 0;
-    for (const c of chunks) { out.set(c, off); off += c.length; }
-    onProgress?.(1);
-    log(`FETCH DONE: ${label}, ${received} bytes`);
-    return out.buffer;
-}
-
 export async function initSynth({ onProgress } = {}) {
-    if (initialized) return { synth, seq, audioContext };
+    if (readyPromise) return readyPromise;
 
-    setStatus('Loading SoundFont...');
-    const sfBuffer = await fetchWithProgress(SOUNDFONT_URL, 'SoundFont', p => onProgress?.(p * 0.7));
+    readyPromise = (async () => {
+        const overlay = document.getElementById('audioUnlock');
+        const overlayProgress = document.getElementById('audioUnlockProgress');
+        const overlayFill     = document.getElementById('audioUnlockProgressFill');
+        const overlayLabel    = document.getElementById('audioUnlockProgressLabel');
 
-    setStatus('Initializing AudioContext...');
-    audioContext = new AudioContext();
-    unlockAudioContext(audioContext);
+        if (overlay) {
+            overlay.classList.remove('hidden');
+            await new Promise(resolve => {
+                const onClick = () => {
+                    overlay.removeEventListener('click', onClick);
+                    window.removeEventListener('keydown', onKey);
+                    resolve();
+                };
+                const onKey = (e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                        overlay.removeEventListener('click', onClick);
+                        window.removeEventListener('keydown', onKey);
+                        resolve();
+                    }
+                };
+                overlay.addEventListener('click', onClick);
+                window.addEventListener('keydown', onKey);
+            });
 
-    setStatus('Loading AudioWorklet...');
-    await audioContext.audioWorklet.addModule(WORKLET_URL);
+            // После клика — переводим оверлей в режим прогресса
+            overlay.querySelector('.audio-unlock-icon').style.display  = 'none';
+            overlay.querySelector('.audio-unlock-title').textContent   = 'Loading…';
+            overlay.querySelector('.audio-unlock-sub').style.display   = 'none';
+            overlayProgress?.classList.remove('hidden');
+        }
 
-    setStatus('Importing bundle...');
-    const mod = await import(BUNDLE_URL);
-    const { WorkletSynthesizer, Sequencer } = mod;
-    if (!WorkletSynthesizer || !Sequencer) {
-        throw new Error('Bundle missing required exports');
-    }
+        const report = (p) => {
+            const pct = Math.round(p * 100);
+            if (overlayFill)  overlayFill.style.width = pct + '%';
+            if (overlayLabel) overlayLabel.textContent = `Loading… ${pct}%`;
+            onProgress?.(p);
+        };
+        report(0);
 
-    setStatus('Creating synth...');
-    synth = new WorkletSynthesizer(audioContext);
-    synth.connect(audioContext.destination);
+        const savedRate = parseInt(localStorage.getItem('midi-player.sampleRate') || '44100', 10);
+        const sampleRate = [44100, 48000, 96000].includes(savedRate) ? savedRate : 44100;
 
-    setStatus('Adding SoundFont...');
+        let ctxOptions = { latencyHint: 'interactive' };
+        try {
+            ctxOptions.sampleRate = sampleRate;
+            ctx = new AudioContext(ctxOptions);
+        } catch (e) {
+            console.warn(`[synth] sampleRate ${sampleRate} не поддерживается, дефолт`, e);
+            delete ctxOptions.sampleRate;
+            ctx = new AudioContext(ctxOptions);
+        }
+        ['pointerdown', 'keydown'].forEach(evt =>
+            window.addEventListener(evt, () => {
+                if (ctx.state !== 'running') ctx.resume();
+            }, { capture: true })
+        );
+        if (ctx.state !== 'running') await ctx.resume();
+        report(0.05);
 
-    // Ждём событие presetListChange, а не просто возврат addSoundBank
-    const presetListReady = new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => {
-            reject(new Error('Timed out waiting for presetListChange (30 s)'));
-        }, 30000);
+        await ctx.audioWorklet.addModule(
+            new URL('../../spessasynth_processor.min.js', import.meta.url)
+        );
+        report(0.1);
 
-        synth.eventHandler.addEvent('presetListChange', 'boot', (presetList) => {
-            // Событие может прийти несколько раз; ждём первый непустой список
-            if (presetList && presetList.length > 0) {
-                clearTimeout(timeout);
-                synth.eventHandler.removeEvent('presetListChange', 'boot');
-                resolve(presetList);
-            }
-        });
-    });
+        synth = new WorkletSynthesizer(ctx, { eventsEnabled: true, convolverMode: false });
+        await synth.isReady;
+        report(0.15);
 
-    // Передаём ArrayBuffer — addSoundBank сам отправит его в воркле́т
-    await synth.soundBankManager.addSoundBank(sfBuffer, 'main');
+        const sfResp = await fetch(new URL('../../soundfont.sf2', import.meta.url));
+        if (!sfResp.ok) throw new Error(`SoundFont HTTP ${sfResp.status}`);
+        const sfBuffer = await sfResp.arrayBuffer();
+        report(0.35);
 
-    // Ждём, пока воркле́т пришлёт непустой presetListChange
-    const presets = await presetListReady;
-    log(`Preset list size: ${presets.length}`);
+        await synth.soundBankManager.addSoundBank(sfBuffer, 'main-sf2', 0);
+        report(0.95);
 
-    // isReady тоже нужно дождаться, но presetListChange уже гарантирует,
-    // что банк разобран; isReady может резолвиться раньше — на всякий случай
-    await synth.isReady;
+        synth.connect(ctx.destination);
+        seq = new Sequencer(synth, { skipToFirstNoteOn: true });
+        report(1);
 
-    setStatus('Creating sequencer...');
-    seq = new Sequencer(synth, { skipToFirstNoteOn: true, initialPlaybackRate: 1 });
-    seq.eventHandler.addEvent('songChange', 'boot', () => {
-        const ready = pendingSongReady;
-        pendingSongReady = null;
-        ready?.();
-    });
+        if (overlay) {
+            overlay.classList.add('hidden');
+            setTimeout(() => overlay.remove(), 300);
+        }
 
-    initialized = true;
-    log('Synth/Sequencer ready');
-    return { synth, seq, audioContext };
+        return { ctx, synth, seq };
+    })();
 
-    setStatus('Creating sequencer...');
-    seq = new Sequencer(synth, { skipToFirstNoteOn: true, initialPlaybackRate: 1 });
-    seq.eventHandler.addEvent('songChange', 'boot', () => {
-        const ready = pendingSongReady;
-        pendingSongReady = null;
-        ready?.();
-    });
-
-    initialized = true;
-    log('Synth/Sequencer ready');
-    return { synth, seq, audioContext };
-}
-
-export const getSynth = () => synth;
-export const getSeq = () => seq;
-export const getAudioContext = () => audioContext;
-
-function whenSongReady() {
-    if (!seq) return Promise.reject(new Error('Sequencer not initialized'));
-    return new Promise(resolve => { pendingSongReady = resolve; });
-}
-let songDuration = 0;
-
-export async function loadSong(buffer, name = 'Untitled') {
-    if (!seq) throw new Error('Sequencer not initialized');
-
-    // Разбираем MIDI на главном потоке, чтобы получить duration независимо от songChange
-    const { BasicMIDI } = await import(BUNDLE_URL);
-    try {
-        const midi = BasicMIDI.fromArrayBuffer(buffer.slice(0), name);
-        songDuration = midi.duration;
-        log(`Parsed MIDI on main thread: ${name}, duration ${songDuration.toFixed(1)} s`);
-    } catch (e) {
-        log(`Main-thread MIDI parse failed: ${e.message}`, 'warn');
-        songDuration = 0;
-    }
-
-    await seq.loadNewSongList([{ binary: buffer, fileName: name }]);
-    // songChange может упасть, поэтому не ждём его; просто даём библиотеке время
-    await new Promise(r => setTimeout(r, 100));
-}
-
-export function getSongDuration() {
-    return songDuration;
-}
-
-export async function resumeAudio() {
-    if (!audioContext) return;
-    if (audioContext.state !== 'running') {
-        try { await audioContext.resume(); } catch (e) { log('resume failed: ' + e.message, 'error'); }
-    }
+    return readyPromise;
 }

@@ -2,6 +2,8 @@
 soundfont.sf2
 *.sf2
 *.sf3
+*.js__
+*.sf2_
 
 # Зависимости и временные файлы
 node_modules/
@@ -9,3 +11,9 @@ supermium-profile/
 port.txt
 server.log
 *.log
+
+# Корзина
+TRASHBIN/
+
+# stuff~
+supermium-profile/

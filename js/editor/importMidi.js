@@ -39,6 +39,7 @@ export function importMidi(buffer, name = '') {
         const p = seq.addPattern({
             name: channel === 9 ? 'Drums (Ch 10)' : `Ch ${channel + 1}`,
             lengthTicks: lastTick,
+            channel,
         });
         channelPatterns.set(channel, p);
         return p;
@@ -89,7 +90,7 @@ export function importMidi(buffer, name = '') {
             const val = event.data[1];
             const ch = seq.channels[channel];
             if (!ch) return;
-            if (cc === 7)  ch.volume = val;
+            if (cc === 7)  ch.volume = Math.round(val * 100 / 127);
             if (cc === 10) ch.pan    = val;
         }
     });

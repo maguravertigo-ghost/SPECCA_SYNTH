@@ -1,3 +1,4 @@
+// js/playlist.js
 // Playlist model + persistence.
 // Metadata (name/order)  -> localStorage
 // MIDI blobs (user files)-> IndexedDB
@@ -128,6 +129,15 @@ export class Playlist {
         this.saveMeta();
         this.emit();
         return true;
+    }
+
+    // ------- совместимость с main.js / playerOverlay.js -------
+    addUserFile(file)   { return this.addFiles([file]); }
+    removeUserTrack(id) { return this.remove(id); }
+    clearUserTracks() {
+        this.items = this.items.filter(i => i.source !== 'user');
+        this.saveMeta();
+        this.emit();
     }
 
     async getBuffer(item) {

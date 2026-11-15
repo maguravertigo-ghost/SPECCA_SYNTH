@@ -1,0 +1,73 @@
+// js/ui/menubar.js | 2.2 KB | 2026-11-13 21:09:59
+
+// js/ui/menubar.js
+import { log } from '../core/log.js';
+
+const ACTIONS = {
+    'file-new':          'new',
+    'file-open':         'open',
+    'file-save':         'save',
+    'file-save-as':      'saveAs',
+
+    'edit-undo':         'undo',
+    'edit-redo':         'redo',
+    'edit-cut':          'cut',
+    'edit-copy':         'copy',
+    'edit-paste':        'paste',
+    'edit-delete':       'del',
+
+    'player-open':       'openPlayer',
+    'player-save-playlist':  'savePlaylist',
+    'player-clear-playlist': 'clearPlaylist',
+};
+
+export function mountMenubar(handlers = {}) {
+    const menus = document.querySelectorAll('.menu');
+    let openMenu = null;
+
+    const closeAll = () => {
+        menus.forEach(m => m.classList.remove('open'));
+        openMenu = null;
+    };
+
+    menus.forEach(menu => {
+        const btn = menu.querySelector('.menu-btn');
+        btn?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (openMenu === menu) { closeAll(); return; }
+            closeAll();
+            menu.classList.add('open');
+            openMenu = menu;
+        });
+    });
+
+    document.addEventListener('click', closeAll);
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') closeAll();
+    });
+
+    document.querySelectorAll('.menu-dropdown button[data-action]').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const action = ACTIONS[btn.dataset.action];
+            closeAll();
+            if (!action) return;
+            const fn = handlers[action];
+            if (typeof fn === 'function') {
+                try { fn(); }
+                catch (err) { log(`Menu [${action}] failed: ${err}`, 'error'); }
+            } else {
+                log(`Menu [${action}] — not wired yet`, 'warn');
+            }
+        });
+    });
+
+    return {
+        setEnabled(action, enabled) {
+            const map = Object.entries(ACTIONS).find(([, a]) => a === action);
+            if (!map) return;
+            const btn = document.querySelector(`[data-action="${map[0]}"]`);
+            if (btn) btn.disabled = !enabled;
+        },
+    };
+}

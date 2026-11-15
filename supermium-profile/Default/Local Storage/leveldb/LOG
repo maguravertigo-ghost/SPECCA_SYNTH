@@ -1,3 +1,6 @@
-2026/11/12-23:12:18.094 1498 Reusing MANIFEST C:\Users\segura_kaa\Documents\DEEPSEEK\SPECCA_SYNTH\supermium-profile\Default\Local Storage\leveldb/MANIFEST-000001
-2026/11/12-23:12:18.105 1498 Recovering log #3
-2026/11/12-23:12:18.107 1498 Reusing old log C:\Users\segura_kaa\Documents\DEEPSEEK\SPECCA_SYNTH\supermium-profile\Default\Local Storage\leveldb/000003.log 
+2026/11/14-16:39:38.774 12c0 Reusing MANIFEST C:\Users\segura_kaa\Documents\DEEPSEEK\SPECCA_SYNTH\supermium-profile\Default\Local Storage\leveldb/MANIFEST-000001
+2026/11/14-16:39:38.784 12c0 Recovering log #3
+2026/11/14-16:39:38.854 12c0 Reusing old log C:\Users\segura_kaa\Documents\DEEPSEEK\SPECCA_SYNTH\supermium-profile\Default\Local Storage\leveldb/000003.log 
+2026/11/14-23:37:06.228 12cc Level-0 table #5: started
+2026/11/14-23:37:06.342 12cc Level-0 table #5: 14513 bytes OK
+2026/11/14-23:37:06.390 12cc Delete type=0 #3

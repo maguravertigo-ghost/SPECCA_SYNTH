@@ -1,4 +1,4 @@
-@REM start.bat | 1.9 KB | 2026-11-12 19:24:12
+@REM start.bat | 2.5 KB | 2026-11-12 23:15:02
 
 @echo off
 setlocal EnableDelayedExpansion
@@ -75,7 +75,21 @@ set "URL=%HOST%!PORT!/"
 echo  [+] Server started on port !PORT!.
 echo.
 echo  [i] Opening !URL!
-start "" "!URL!"
+REM --- Try to activate existing app window ---
+powershell -NoProfile -Command "$s = New-Object -ComObject WScript.Shell; if ($s.AppActivate('MIDI Player')) { exit 0 } else { exit 1 }"
+if not errorlevel 1 (
+    echo  [i] Switched to existing window.
+    exit /b 0
+)
+
+REM --- Not open yet: launch in dedicated profile ---
+set "APP_PROFILE=%~dp0supermium-profile"
+set "CHROME_EXE=C:\Program Files\Supermium\chrome.exe"
+if exist "!CHROME_EXE!" (
+    start "" "!CHROME_EXE!" --user-data-dir="!APP_PROFILE!" --no-first-run --no-default-browser-check --new-window "!URL!"
+) else (
+    start "" "!URL!"
+)
 
 echo.
 echo  [i] To stop the server: close the "MIDI Player Server" window.

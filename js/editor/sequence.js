@@ -43,8 +43,8 @@ export class Sequence {
         return this.patterns.find(p => p.id === id) ?? null;
     }
 
-    addPattern({ name = 'Pattern', lengthTicks = this.timeDivision * 4 } = {}) {
-        const p = { id: makeId('pat'), name, lengthTicks, notes: [] };
+    addPattern({ name = 'Pattern', lengthTicks = this.timeDivision * 4, channel = 0 } = {}) {
+        const p = { id: makeId('pat'), name, lengthTicks, channel, notes: [] };
         this.patterns.push(p);
         return p;
     }
@@ -71,7 +71,9 @@ export class Sequence {
     }
 
     placePattern(patternId, startTick) {
-        this.arrangement.push({ patternId, startTick });
+        const pl = { id: makeId('pl'), patternId, startTick };
+        this.arrangement.push(pl);
+        return pl;
     }
 
     // Плоский список событий в секундах. Сортирован.
