@@ -35,6 +35,20 @@ test('resizing validates notes and all placed copies without mutating on failure
     assert.equal(seq.resizePattern(a.id, 1), false);
 });
 
+test('comment resize has a one-bar minimum and respects the nearest next clip across copies', () => {
+    const seq = new Sequence({ channels: [{ channel: 4, kind: 'comment' }] });
+    const bar = seq.ticksPerBar;
+    const cue = seq.addPattern({ channel: 4, lengthTicks: bar });
+    const next = seq.addPattern({ channel: 4, lengthTicks: bar });
+    seq.placePattern(cue.id, 0);
+    seq.placePattern(cue.id, 6 * bar);
+    seq.placePattern(next.id, 9 * bar);
+    assert.deepEqual(seq.patternResizeBounds(cue.id), { minBars: 1, maxBars: 3 });
+    assert.equal(seq.resizePattern(cue.id, 3), true);
+    assert.throws(() => seq.resizePattern(cue.id, 4), /overlap/);
+    assert.equal(seq.resizePattern(cue.id, 1), true);
+});
+
 test('comment clips save with the project but do not alter any MIDI event or duration', () => {
     const seq = new Sequence({ channels: [{ channel: 0 }, { channel: 1, kind: 'comment' }] });
     const music = seq.addPattern({ channel: 0 });

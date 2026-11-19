@@ -36,7 +36,14 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
                 </div>
                 <output id="arrTime" class="arr-time">0:00.0 / 0:00.0</output>
                 <div class="arr-toolbar-options">
-                    <button aria-label="Loop" title="Loop" id="arrLoopBtn" class="arr-control arr-loop active" type="button" aria-pressed="true"><span class="material-icon" aria-hidden="true">repeat</span></button>
+                    <div class="arr-transport-group" role="group" aria-label="Loop range">
+                        <button id="arrLoopAll" class="arr-control" type="button" aria-label="Loop entire track" title="Loop entire track">
+                            <svg class="arr-fit-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M3 5v14m18-14v14M6 12h12m-9-3-3 3 3 3m6-6 3 3-3 3"/>
+                            </svg>
+                        </button>
+                        <button aria-label="Loop" title="Loop" id="arrLoopBtn" class="arr-control arr-loop active" type="button" aria-pressed="true"><span class="material-icon" aria-hidden="true">repeat</span></button>
+                    </div>
                     <label class="arr-volume" title="Master volume">
                         <span>Volume</span>
                         <input id="arrMasterVol" type="range" min="0" max="100" value="100">
@@ -72,6 +79,7 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
     const playBtn     = $('#arrPlay');
     const pauseBtn    = $('#arrPause');
     const loopBtn     = $('#arrLoopBtn');
+    const loopAllBtn  = $('#arrLoopAll');
 
     const state = {
         loopEnabled: true,
@@ -135,6 +143,7 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
     const effectiveLoopEnd = () => state.loopEndTick ?? playableDurationTick();
     const hasLoop = () => state.loopEnabled && effectiveLoopEnd() > state.loopStartTick;
     const updateLoopButton = () => {
+        loopAllBtn.disabled = !playableDurationTick();
         loopBtn.classList.toggle('active', hasLoop());
         loopBtn.setAttribute('aria-pressed', String(hasLoop()));
     };
@@ -241,11 +250,12 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
                 const w = Math.max(8, right - left);
                 const text = pat.comment?.trim() || '';
                 const label = comment && text ? `${pat.name} · ${text.replace(/\s+/g, ' ')}` : pat.name;
+                const handle = comment ? `<span class="arr-clip-resize" title="Drag to resize the comment pattern" aria-hidden="true"><i class="material-icon">swap_horiz</i></span>` : '';
                 const hint = comment ? `${pat.name} · ${text || 'Notes'}` : `${pat.name} · ${pat.notes.length} notes`;
                 html += `<div class="arr-clip${selected}${comment ? ' arr-comment-clip' : ''}" data-placement="${escapeHtml(pl.id)}"
                               data-channel="${i}"
                               style="left:${left}px;width:${w}px;background:${color}"
-                              title="${escapeHtml(hint)}">${comment ? '' : patternPreview(pat)}<span>${escapeHtml(label)}</span></div>`;
+                              title="${escapeHtml(hint)}">${comment ? '' : patternPreview(pat)}<span class="arr-clip-label">${escapeHtml(label)}</span>${handle}</div>`;
             }
             html += `  </div>`;
             html += `</div>`;
@@ -386,7 +396,7 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
     });
     rows.addEventListener('dblclick', (e) => {
         const clip = e.target.closest('.arr-clip');
-        if (!clip) return;
+        if (!clip || e.target.closest('.arr-clip-resize')) return;
         const placement = getSeq()?.arrangement.find(p => p.id === clip.dataset.placement);
         if (placement) onOpenChannel?.(Number(clip.dataset.channel), placement.patternId);
     });
@@ -406,6 +416,18 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
             focusPattern(channel, placement.patternId);
             rows.querySelector('.arr-clip.selected')?.classList.remove('selected');
             clip.classList.add('selected');
+            if (e.target.closest('.arr-clip-resize')) {
+                const pattern = s.getPattern(placement.patternId);
+                if (!pattern) return;
+                const { minBars, maxBars } = s.patternResizeBounds(pattern.id);
+                state.dragMode = 'resize-clip';
+                state.dragClip = { sequence: s, placement, channel, barWidth: barW(),
+                    minBars, maxBars, initialBars: pattern.lengthTicks / tpb(), nextBars: null,
+                    startClientX: e.clientX, scrollLeft: body.scrollLeft, origWidth: parseFloat(clip.style.width),
+                    el: clip, pointerId: e.pointerId };
+                clip.classList.add('resizing');
+                return;
+            }
             state.dragMode = 'move-clip';
             state.dragClip = { sequence: s, placement, channel, barWidth: barW(),
                 gridLeft: grid.getBoundingClientRect().left,
@@ -599,6 +621,14 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
     const onWindowPointerMove = (e) => {
         if (state.paint?.pointerId === e.pointerId) paintGrid(e);
         const d = state.dragClip;
+        if (d?.pointerId === e.pointerId && state.dragMode === 'resize-clip') {
+            if (d.maxBars < d.minBars) return;
+            const deltaBars = Math.round((e.clientX - d.startClientX + body.scrollLeft - d.scrollLeft) / d.barWidth);
+            const bars = deltaBars ? Math.max(d.minBars, Math.min(d.maxBars, Math.round(d.initialBars) + deltaBars)) : d.initialBars;
+            d.nextBars = bars === d.initialBars ? null : bars;
+            d.el.style.width = `${d.nextBars == null ? d.origWidth : d.nextBars * d.barWidth}px`;
+            return;
+        }
         if (d && d.pointerId === e.pointerId) {
             const dx = e.clientX - d.startClientX;
             if (Math.abs(dx) > 3) d.moved = true;
@@ -643,6 +673,16 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
         }
         const d = state.dragClip;
         if (d && d.pointerId !== e.pointerId) return;
+        if (d && state.dragMode === 'resize-clip') {
+            state.dragMode = null; state.dragClip = null;
+            d.el.classList.remove('resizing');
+            d.el.style.width = `${d.origWidth}px`;
+            if (e.type !== 'pointercancel' && d.nextBars != null && d.sequence === getSeq()) {
+                try { if (d.sequence.resizePattern(d.placement.patternId, d.nextBars)) edit(false); }
+                catch (error) { setStatus(error.message); }
+            }
+            return;
+        }
         if (d) {
             const pattern = d.sequence.getPattern(d.placement.patternId);
             if (e.type !== 'pointercancel' && d.moved && pattern && d.sequence === getSeq() &&
@@ -800,6 +840,14 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
     $('#arrStop')?.addEventListener('click', stop);
     $('#arrHome')?.addEventListener('click', () => seekTick(0, true));
     $('#arrEnd')?.addEventListener('click', () => seekTick(playableDurationTick() || arrangementDurationTick(), true));
+    loopAllBtn.addEventListener('click', () => {
+        if (!playableDurationTick()) return;
+        if (state.loopEnabled && state.loopStartTick === 0 && state.loopEndTick === null) return;
+        state.loopEnabled = true;
+        state.loopStartTick = 0;
+        state.loopEndTick = null;
+        updatePlayback(); markDirty();
+    });
     loopBtn?.addEventListener('click', () => {
         state.loopEnabled = !state.loopEnabled;
         if (state.loopEnabled && state.loopStartTick === effectiveLoopEnd()) {

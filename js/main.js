@@ -72,35 +72,20 @@ const getChannelPattern = (channel) => {
     return selected && selected.channel === channel ? selected : currentSequence?.getChannelPattern(channel);
 };
 
-const createEmptySequence = () => {
-    const seq = Sequence.create();
-    seq.name = 'Untitled';
-    seq.tempo = 120;
-    seq.timeDivision = 480;
-    const defaultPrograms = {
-        0:  0,    // Piano (Acoustic Grand)
-        1:  33,   // Bass (Finger)
-        2:  48,   // Strings (Ensemble)
-        3:  61,   // Brass (Section)
-        4:  120,  // FX (Rain)
-        9:  0,    // Drums
-    };
-    seq.channels = [];
-    for (let ch = 0; ch < 16; ch++) {
-        seq.channels.push({
-            channel: ch,
-            program: defaultPrograms[ch] ?? 0,
-            isDrum: ch === 9,
-            volume: 100,
-            pan: 64,
-            muted: false,
-        });
-    }
-    return seq;
-};
+const createEmptySequence = () => new Sequence({
+    name: 'Untitled', tempo: 120, timeDivision: 480,
+    channels: [{ channel: 9, name: 'Drums', program: 0, isDrum: true, volume: 100, pan: 64, muted: false }],
+});
+
+function refreshProjectTempo() {
+    const output = document.getElementById('projectBpm');
+    const tempo = currentSequence?.tempo;
+    output.value = Number.isFinite(tempo) ? String(Number(tempo.toFixed(2))) : '–';
+}
 
 function useSequence(sequence, name = null) {
     currentSequence = sequence;
+    refreshProjectTempo();
     history.reset(sequence.toJSON(0)); syncHistory();
     lastLoadedName = name;
     selectedPatterns.clear();
@@ -216,6 +201,7 @@ const showPianoRoll = () => {
 };
 
 function refreshAll() {
+    refreshProjectTempo();
     pianoRoll?.refresh?.();
     arrangerView?.refresh?.();
 }

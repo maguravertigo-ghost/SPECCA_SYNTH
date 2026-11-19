@@ -87,23 +87,31 @@ export class Sequence {
 
     get ticksPerBar() { return Math.max(1, Math.round(this.timeDivision * this.stepsPerBar / 4)); }
 
+    patternResizeBounds(id) {
+        const pattern = this.getPattern(id);
+        if (!pattern) return null;
+        const bar = this.ticksPerBar;
+        const lastNote = pattern.notes.reduce((end, note) => Math.max(end, note.tick + note.dur), 0);
+        const minBars = Math.max(1, Math.ceil(lastNote / bar));
+        let maxBars = 1024;
+        const ids = new Set(this.patterns.filter(p => p.channel === pattern.channel).map(p => p.id));
+        const lane = this.arrangement.filter(c => ids.has(c.patternId)).sort((a, b) => a.startTick - b.startTick);
+        // Resizing one definition changes each of its placements.
+        for (let i = 0; i < lane.length - 1; i++) {
+            if (lane[i].patternId === id) maxBars = Math.min(maxBars, Math.floor((lane[i + 1].startTick - lane[i].startTick) / bar));
+        }
+        return { minBars, maxBars };
+    }
+
     resizePattern(id, bars) {
         const pattern = this.getPattern(id);
         if (!pattern || !Number.isSafeInteger(bars) || bars < 1 || bars > 1024) throw new Error('Enter a length from 1 to 1024 bars.');
         const length = bars * this.ticksPerBar;
         if (length === pattern.lengthTicks) return false;
-        if (pattern.notes.some(note => note.tick + note.dur > length)) {
-            throw new Error('Move or shorten notes beyond the new end first.');
-        }
-        if (length > pattern.lengthTicks) {
-            const ids = new Set(this.patterns.filter(p => p.channel === pattern.channel).map(p => p.id));
-            const lane = this.arrangement.filter(c => ids.has(c.patternId)).sort((a, b) => a.startTick - b.startTick);
-            // Extending a pattern affects all copies. Check each copy against the next clip on its lane.
-            for (let i = 0; i < lane.length - 1; i++) {
-                if (lane[i].patternId === id && lane[i].startTick + length > lane[i + 1].startTick) {
-                    throw new Error('Not enough room: at least one copy would overlap the next clip.');
-                }
-            }
+        const { minBars, maxBars } = this.patternResizeBounds(id);
+        if (bars < minBars) throw new Error('Move or shorten notes beyond the new end first.');
+        if (length > pattern.lengthTicks && bars > maxBars) {
+            throw new Error('Not enough room: at least one copy would overlap the next clip.');
         }
         pattern.lengthTicks = length;
         return true;
