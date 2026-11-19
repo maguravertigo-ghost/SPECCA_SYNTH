@@ -726,7 +726,7 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
         }
         if (reveal) {
             const x = tickToX(state.cursorTick);
-            if (x < body.scrollLeft + CHAN_W || x > body.scrollLeft + body.clientWidth) {
+            if (x < body.scrollLeft + CHAN_W || x >= body.scrollLeft + body.clientWidth) {
                 body.scrollLeft = Math.max(0, x - CHAN_W - 16);
             }
         }
@@ -809,7 +809,7 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
             pausedByUser = false;
             seq.loopCount = loop ? Infinity : 0;
             // Time is set after loading, even when the ruler was clicked before the first Play.
-            if (s.ticksToSeconds(state.cursorTick) >= seq.duration ||
+            if (state.cursorTick >= playableDurationTick() || s.ticksToSeconds(state.cursorTick) >= seq.duration ||
                 (loop && state.loopEndTick !== null && (state.cursorTick < loop.start || state.cursorTick >= loop.end))) {
                 state.cursorTick = loop?.start ?? 0;
             }
@@ -838,15 +838,29 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
         updateTransportUI();
     };
 
-    const stop = (revealStart = false) => {
+    const haltPlayback = () => {
         playbackRequest++;
         clearTimeout(reloadTimer); reloadPending = false;
         loading = pausedByUser = lastFramePlaying = false;
+        const seq = getSequencer?.();
+        seq?.pause();
+        return seq;
+    };
+
+    const stop = (revealStart = false) => {
+        const seq = haltPlayback();
         state.cursorTick = 0;
         if (revealStart) body.scrollLeft = 0;
-        const seq = getSequencer?.();
-        if (seq) { try { seq.pause(); seq.currentTime = 0; } catch {} }
+        if (seq) { try { seq.currentTime = 0; } catch {} }
         renderPlayhead(false);
+        updateTransportUI();
+    };
+
+    const goEnd = () => {
+        // Seeking a running sequencer past the loop's end wraps it immediately.
+        // Stop playback and position only the editor; leave the loop intact for Play.
+        haltPlayback();
+        seekTick(playableDurationTick() || arrangementDurationTick(), true, false);
         updateTransportUI();
     };
 
@@ -876,7 +890,7 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
     pauseBtn?.addEventListener('click', pause);
     $('#arrStop')?.addEventListener('click', () => stop(true));
     $('#arrHome')?.addEventListener('click', goHome);
-    $('#arrEnd')?.addEventListener('click', () => seekTick(playableDurationTick() || arrangementDurationTick(), true));
+    $('#arrEnd')?.addEventListener('click', goEnd);
     loopAllBtn.addEventListener('click', () => {
         if (!playableDurationTick()) return;
         if (state.loopEnabled && state.loopStartTick === 0 && state.loopEndTick === null) return;
