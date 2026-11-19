@@ -473,22 +473,10 @@ body { display: flex; flex-direction: column; }
 /* =========================================================
    AUDIO UNLOCK
    ========================================================= */
-.audio-unlock {
-    position: fixed;
-    inset: 0;
-    z-index: 9999;
-    background: rgba(15, 15, 20, 0.85);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    cursor: pointer;
-    transition: opacity 0.25s;
-}
-.audio-unlock.hidden { opacity: 0; pointer-events: none; }
-.audio-unlock-inner { text-align: center; color: var(--text); user-select: none; }
-.audio-unlock-icon { font-size: 56px; margin-bottom: 14px; }
-.audio-unlock-title { font-size: 20px; font-weight: 600; margin-bottom: 6px; }
-.audio-unlock-sub { font-size: 12px; color: var(--text-mut); }
+.audio-enable { flex: none; }
+.audio-state { color: var(--text-mut); font-size: 12px; }
+#audioState { max-width: 20ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.audio-state[data-state="error"] { color: #ff9494; }
 
 /* =========================================================
    SCROLLBARS

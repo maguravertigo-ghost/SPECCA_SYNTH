@@ -1,4 +1,4 @@
-import { getPreviewSequencer, getSynth, loadSong, resumeAudio, bindMasterVolume } from '../core/synth.js';
+import { getPreviewSequencer, getSynth, loadSong, initSynth, bindMasterVolume } from '../core/synth.js';
 import { importMidi } from '../editor/importMidi.js';
 import { adaptToSoundfont } from '../editor/instruments.js';
 import { writeArrangementMIDI } from '../editor/exportMidi.js';
@@ -35,7 +35,7 @@ export function mountPlayerOverlay({ playlist, onOpen, onClose } = {}) {
         const index = playlist.items.findIndex(i => i.id === active?.id);
         const ready = !!seq && loaded?.id === active?.id && !!loaded && !pending;
         const playing = ready && !seq.paused && !seq.isFinished;
-        playBtn.disabled = !seq || pending || !playlist.items.length || playing;
+        playBtn.disabled = pending || !playlist.items.length || playing;
         pauseBtn.disabled = !playing;
         stopBtn.disabled = !ready && !pending;
         previous.disabled = index <= 0;
@@ -64,12 +64,10 @@ export function mountPlayerOverlay({ playlist, onOpen, onClose } = {}) {
 
     async function select(item) {
         if (!item || !visible()) return;
-        const seq = getPreviewSequencer();
-        if (!seq) { status.textContent = 'Audio is not ready'; return; }
         const id = ++request;
         scrubPointer = null;
         seekUntil = 0;
-        seq.pause();
+        getPreviewSequencer()?.pause();
         active = item;
         loaded = null;
         playlist.activeId = item.id;
@@ -79,9 +77,11 @@ export function mountPlayerOverlay({ playlist, onOpen, onClose } = {}) {
         status.textContent = 'Loading…';
         refresh();
         try {
-            let buffer = await playlist.getBuffer(item);
-            await resumeAudio();
+            await initSynth();
             const current = () => visible() && request === id;
+            if (!current()) return;
+            const seq = getPreviewSequencer();
+            let buffer = await playlist.getBuffer(item);
             if (!current()) return;
             if (compatible.checked) {
                 const sequence = importMidi(buffer, item.name);
@@ -155,11 +155,11 @@ export function mountPlayerOverlay({ playlist, onOpen, onClose } = {}) {
 
     playBtn.addEventListener('click', async () => {
         const seq = getPreviewSequencer();
-        if (!seq || pending) return;
-        if (!loaded) return select(active ?? playlist.items[0]);
+        if (pending) return;
+        if (!seq || !loaded) return select(active ?? playlist.items[0]);
         const id = request;
         try {
-            await resumeAudio();
+            await initSynth();
             if (!visible() || id !== request) return;
             if (seq.isFinished) seq.currentTime = 0;
             seq.play();
@@ -199,7 +199,7 @@ export function mountPlayerOverlay({ playlist, onOpen, onClose } = {}) {
     closeBtn.addEventListener('click', close);
     overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
     document.addEventListener('keydown', (e) => {
-        if (e.key === 'F5') { e.preventDefault(); toggle(); }
+        if (e.key === 'F5' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) { e.preventDefault(); toggle(); }
         if (e.key === 'Escape' && visible()) close();
     });
     $('#addFilesBtn').addEventListener('click', () => input.click());

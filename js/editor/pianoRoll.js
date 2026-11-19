@@ -4,7 +4,7 @@ import { instrumentFamily } from './instruments.js';
 import { log } from '../core/log.js';
 import { copyNotes, planPaste } from './noteClipboard.js';
 import { writePatternMIDI } from './exportMidi.js';
-import { getSequencer, resumeAudio, loadSong, applyChannelMix, bindMasterVolume } from '../core/synth.js';
+import { getSequencer, initSynth, loadSong, applyChannelMix, bindMasterVolume } from '../core/synth.js';
 
 const NOTE_NAMES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
 const BLACK_KEYS = new Set([1,3,6,8,10]);
@@ -502,15 +502,14 @@ export function mountPianoRoll(rootEl, opts = {}) {
 
     const pushToSequencer = async (keepPlaying = false) => {
         const seq = getSeq();
-        const sequencer = getSequencer?.();
         const pattern = getPattern();
-        if (!seq || !sequencer || !pattern?.notes.length || !state.visible || rootEl.inert || state.loading) return;
+        if (!seq || !pattern?.notes.length || !state.visible || rootEl.inert || state.loading) return;
         const request = ++playbackRequest;
         state.loading = playBtn.disabled = true;
         try {
-            await resumeAudio();
-
+            await initSynth();
             if (request !== playbackRequest) return;
+            const sequencer = getSequencer();
             const startTick = seq.arrangement.find(p => p.patternId === pattern.id)?.startTick ?? 0;
             const midi = writePatternMIDI(seq, pattern.id, startTick);
             if (!await loadSong(midi, pattern.name, sequencer, () => request === playbackRequest && state.visible && !rootEl.inert)) return;

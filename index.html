@@ -59,7 +59,9 @@
             </select>
         </label>
         <meter class="audio-meter" min="0" max="1" value="0" aria-label="Audio output level" title="Audio output level"></meter>
-        <span id="status" class="app-status">Initializing…</span>
+        <button id="audioUnlock" class="btn audio-enable" type="button">Enable audio</button>
+        <span id="audioState" class="audio-state" role="status">Audio off · press Play</span>
+        <span id="status" class="app-status"></span>
     </div>
 </header>
 
@@ -121,22 +123,10 @@
                 <div class="player-empty">
                     <div class="player-empty-icon">🎵</div>
                     <p id="ptTrackName">No track selected</p>
+                    <p id="ptAudioState" class="audio-state" role="status">Audio off · press Play</p>
                     <p id="ptStatus" class="muted" aria-live="polite">Choose a track to preview. If voices are missing, try Compatible.</p>
                 </div>
             </main>
-        </div>
-    </div>
-</div>
-
-<!-- AUDIO UNLOCK -->
-<div id="audioUnlock" class="audio-unlock hidden">
-    <div class="audio-unlock-inner">
-        <div class="audio-unlock-icon">🔊</div>
-        <div class="audio-unlock-title">Click to enable audio</div>
-        <div class="audio-unlock-sub">Browser requires one click before it can play sound</div>
-        <div class="audio-unlock-progress hidden" id="audioUnlockProgress">
-            <div class="audio-unlock-progress-fill" id="audioUnlockProgressFill"></div>
-            <div class="audio-unlock-progress-label" id="audioUnlockProgressLabel">Loading…</div>
         </div>
     </div>
 </div>

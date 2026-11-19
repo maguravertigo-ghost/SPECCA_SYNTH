@@ -1,6 +1,6 @@
 // js/ui/arrangerView.js
 import { log, setStatus } from '../core/log.js';
-import { getSequencer, applyChannelVolume, resumeAudio, bindMasterVolume, loadSong } from '../core/synth.js';
+import { getSequencer, applyChannelVolume, initSynth, bindMasterVolume, loadSong } from '../core/synth.js';
 import { writeArrangementMIDI } from '../editor/exportMidi.js';
 import { getInstrumentCatalog, mountInstrumentFields } from './instrumentFields.js';
 import { instrumentLabel } from '../editor/instruments.js';
@@ -97,21 +97,9 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
     const getSeq     = () => (typeof getSequence === 'function' ? getSequence() : null);
     const timeDiv    = () => getSeq()?.timeDivision || 480;
     const tpb        = () => Math.max(1, Math.round(timeDiv() * (getSeq()?.stepsPerBar || 16) / 4));
-    const totalBars  = () => {
-        const s = getSeq();
-        let maxBar = 8;
-        if (s?.arrangement) {
-            for (const pl of s.arrangement) {
-                const pat = s.patterns?.find(p => p.id === pl.patternId);
-                if (!pat) continue;
-                maxBar = Math.max(maxBar, Math.ceil((pl.startTick + pat.lengthTicks) / tpb()));
-            }
-        }
-        const loopEndBar = Math.ceil(state.loopEndTick / tpb());
-        return Math.max(8, maxBar, loopEndBar) + 1;
-    };
-    const availW     = () => body.clientWidth - CHAN_W;
-    const barW       = () => state.paint?.barWidth ?? Math.max(MIN_BAR_W, availW() / totalBars());
+    const totalBars = () => Math.max(8, Math.ceil(arrangementDurationTick() / tpb()), Math.ceil(state.loopEndTick / tpb())) + 1;
+    let layoutBarWidth = MIN_BAR_W;
+    const barW = () => state.paint?.barWidth ?? layoutBarWidth;
     const tickToX    = (tick) => CHAN_W + (tick / tpb()) * barW();
     const xToTick    = (x)    => Math.max(0, ((x - CHAN_W) / barW()) * tpb());
     const xToBar     = (x)    => Math.max(0, Math.floor((x - CHAN_W) / barW()));
@@ -122,15 +110,18 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
         return ch?.color || COLORS[idx % COLORS.length];
     };
 
+    let durationTick = 0;
     const arrangementDurationTick = () => {
+        if (!dirty) return durationTick;
         const s = getSeq();
         if (!s?.arrangement?.length) return 0;
-        let maxTick = 0;
+        const lengths = new Map(s.patterns.map(p => [p.id, p.lengthTicks]));
+        let end = 0;
         for (const pl of s.arrangement) {
-            const pat = s.patterns?.find(p => p.id === pl.patternId);
-            if (pat) maxTick = Math.max(maxTick, pl.startTick + pat.lengthTicks);
+            const length = lengths.get(pl.patternId);
+            if (length !== undefined) end = Math.max(end, pl.startTick + length);
         }
-        return maxTick;
+        return end;
     };
 
     const effectiveLoopEnd = () => {
@@ -260,23 +251,26 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
         }
         lastFramePlaying = playing;
         const x = tickToX(state.cursorTick);
+        const scrollLeft = body.scrollLeft;
         playhead.style.transform = `translateX(${x - 1}px)`;
-        playhead.style.display = x >= CHAN_W && x >= body.scrollLeft + CHAN_W ? 'block' : 'none';
+        playhead.style.display = x >= scrollLeft + CHAN_W ? 'block' : 'none';
         ruler.dataset.playheadTick = String(Math.round(state.cursorTick));
         const fmt = (seconds) => {
             const s = Math.max(0, seconds || 0);
             const m = Math.floor(s / 60);
             return `${m}:${Math.floor(s - m * 60).toString().padStart(2, '0')}.${Math.floor((s % 1) * 10)}`;
         };
-        timeEl.textContent = `${fmt(song.ticksToSeconds(state.cursorTick))} / ${fmt(song.ticksToSeconds(end))}`;
+        const timeText = `${fmt(song.ticksToSeconds(state.cursorTick))} / ${fmt(song.ticksToSeconds(end))}`;
+        if (timeEl.textContent !== timeText) timeEl.textContent = timeText;
     };
 
     const render = () => {
         if (!dirty || state.dragClip) return;
+        durationTick = arrangementDurationTick();
         dirty = false;
+        layoutBarWidth = Math.max(MIN_BAR_W, (body.clientWidth - CHAN_W) / totalBars());
         renderRuler();
         renderRows();
-        renderPlayhead();
     };
 
     // ==================================================================
@@ -589,9 +583,8 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
             return;
         }
         if (state.paint?.pointerId === e.pointerId) {
-            const previousWidth = state.paint.barWidth;
             state.paint = null;
-            if (Math.abs(barW() - previousWidth) > 0.01) markDirty();
+            markDirty();
         }
         const d = state.dragClip;
         if (d && d.pointerId !== e.pointerId) return;
@@ -674,8 +667,7 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
     // ==================================================================
     const updateTransportUI = () => {
         const seq = getSequencer?.();
-        if (!seq) return;
-        const loaded = loadedSequence === getSeq() && !seq.isFinished;
+        const loaded = !!seq && loadedSequence === getSeq() && !seq.isFinished;
         playBtn.classList.toggle('active', loaded && !seq.paused);
         pauseBtn.classList.toggle('active', loaded && pausedByUser && seq.paused);
         playBtn.disabled = loading || !getSeq()?.arrangement.length || (loaded && !seq.paused);
@@ -683,10 +675,8 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
     };
 
     const play = async () => {
-        const seq = getSequencer?.();
-        const s   = getSeq();
-        if (!seq || !s?.arrangement.length || loading || rootEl.inert) return;
-        const resume = loadedSequence === s && pausedByUser && !seq.isFinished;
+        const s = getSeq();
+        if (!s?.arrangement.length || loading || rootEl.inert) return;
         const request = ++playbackRequest;
         loading = true;
         updateTransportUI();
@@ -694,8 +684,10 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
         const end = Math.max(effectiveLoopEnd(), state.loopStartTick + tpb());
         const loop = { start: state.loopStartTick, end };
         try {
-            await resumeAudio();
+            await initSynth();
             if (!current()) return;
+            const seq = getSequencer();
+            const resume = loadedSequence === s && pausedByUser && !seq.isFinished;
             if (!resume) {
                 const midi = writeArrangementMIDI(s, { loop, respectMute: true });
                 if (!await loadSong(midi, 'arrangement', seq, current)) return;
@@ -760,8 +752,7 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
         if (e.key === ' ') {
             e.preventDefault();
             const seq = getSequencer?.();
-            if (!seq) return;
-            if (loadedSequence === getSeq() && !seq.paused && !seq.isFinished) pause();
+            if (seq && loadedSequence === getSeq() && !seq.paused && !seq.isFinished) pause();
             else play();
         } else if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
             e.preventDefault();

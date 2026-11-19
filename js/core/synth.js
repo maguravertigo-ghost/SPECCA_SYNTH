@@ -47,6 +47,37 @@ let synth = null;
 let seq = null;
 let previewSeq = null;
 let readyPromise = null;
+let audioStatus = { state: 'idle', message: 'Audio off · press Play' };
+const statusListeners = new Set();
+
+export function onAudioStatus(listener) {
+    statusListeners.add(listener);
+    listener(audioStatus);
+    return () => statusListeners.delete(listener);
+}
+
+function reportAudio(state, message) {
+    audioStatus = { state, message };
+    for (const listener of statusListeners) listener(audioStatus);
+}
+
+async function audioStep(label, milliseconds, start, workletFailure) {
+    reportAudio('loading', label);
+    let timer;
+    try {
+        return await Promise.race([
+            start(),
+            new Promise((_, reject) => {
+                timer = setTimeout(() => reject(new Error(`no response after ${milliseconds / 1000}s`)), milliseconds);
+            }),
+            ...(workletFailure ? [workletFailure] : []),
+        ]);
+    } catch (error) {
+        throw new Error(`${label}: ${error?.message ?? error}`, { cause: error });
+    } finally {
+        clearTimeout(timer);
+    }
+}
 
 export const getAudioContext = () => ctx;
 export const getSynth        = () => synth;
@@ -85,95 +116,80 @@ function ensureContext() {
         console.warn(`[synth] Requested sample rate ${sampleRate} unavailable; using the device rate.`, e);
         ctx = new AudioContext({ latencyHint: 'interactive' });
     }
-    // Resume inside the browser's trusted gesture, before any asynchronous MIDI loading.
-    const unlock = () => { if (ctx.state === 'suspended' || ctx.state === 'interrupted') ctx.resume().catch(() => {}); };
-    window.addEventListener('pointerdown', unlock, { capture: true });
-    window.addEventListener('keydown', unlock, { capture: true });
     return ctx;
 }
 
-export async function initSynth({ onProgress } = {}) {
-    if (readyPromise) return readyPromise;
-
-    ensureContext();
-
-    const overlay       = document.getElementById('audioUnlock');
-    const progressEl    = document.getElementById('audioUnlockProgress');
-    const progressFill  = document.getElementById('audioUnlockProgressFill');
-    const progressLabel = document.getElementById('audioUnlockProgressLabel');
-
-    // Один клик. Если контекст уже running (жест был раньше) — пропускаем ожидание.
-    if (overlay && ctx.state !== 'running') {
-        overlay.classList.remove('hidden');
-        await new Promise(resolve => {
-            const done = () => {
-                overlay.removeEventListener('click', done);
-                window.removeEventListener('keydown', onKey);
-                resolve();
-            };
-            const onKey = (e) => { if (e.key === 'Enter' || e.key === ' ') done(); };
-            overlay.addEventListener('click', done);
-            window.addEventListener('keydown', onKey);
-        });
-    }
-
-    // Переключаем оверлей в режим прогресса (он остаётся видимым до 100%).
-    if (overlay) {
-        overlay.querySelector('.audio-unlock-icon').style.display   = 'none';
-        overlay.querySelector('.audio-unlock-title').textContent    = 'Loading…';
-        overlay.querySelector('.audio-unlock-sub').style.display    = 'none';
-        progressEl?.classList.remove('hidden');
-    }
-
-    const report = (p) => {
-        const pct = Math.round(p * 100);
-        if (progressFill)  progressFill.style.width = pct + '%';
-        if (progressLabel) progressLabel.textContent = `Loading… ${pct}%`;
-        onProgress?.(p);
-    };
-    report(0);
-
-    readyPromise = (async () => {
+// Called directly from Play or Enable audio, before any asynchronous MIDI I/O.
+export async function initSynth() {
+    if (synth) {
         await resumeAudio();
-        report(0.05);
+        return;
+    }
+    if (readyPromise) {
+        // A second user gesture can unlock a resume still waiting for permission.
+        if (ctx?.state === 'suspended') ctx.resume().catch(() => {});
+        return readyPromise;
+    }
 
-        await ctx.audioWorklet.addModule(
-            new URL('../../spessasynth_processor.min.js', import.meta.url)
-        );
-        report(0.15);
+    const init = async () => {
+        let context, candidate, node, onProcessorError;
+        const download = new AbortController();
+        try {
+            context = ensureContext();
+            await audioStep('Unlocking audio', 3000, resumeAudio);
+            if (!context.audioWorklet) throw new Error('AudioWorklet unavailable. Open the site in a secure browser tab (HTTPS or localhost).');
 
-        synth = new WorkletSynthesizer(ctx, { eventsEnabled: true, convolverMode: false });
-        await synth.isReady;
-        report(0.20);
+            await audioStep('Loading AudioWorklet', 12000, () => context.audioWorklet.addModule(
+                new URL('../../spessasynth_processor.min.js', import.meta.url),
+            ));
+            const workletFailure = new Promise((_, reject) => {
+                onProcessorError = () => reject(new Error('AudioWorklet processor failed'));
+            });
+            await audioStep('Starting synth (Vorbis decoder)', 10000, () => {
+                candidate = new WorkletSynthesizer(context, {
+                    eventsEnabled: true, convolverMode: false,
+                    audioNodeCreators: { worklet: (context, name, options) => {
+                        node = new AudioWorkletNode(context, name, options);
+                        node.addEventListener('processorerror', onProcessorError);
+                        return node;
+                    } },
+                });
+                // Keep the node in the active output graph while it starts up.
+                masterGain = context.createGain();
+                masterGain.gain.value = volume;
+                analyser = context.createAnalyser();
+                analyser.fftSize = 2048;
+                sampleFrame = new Float32Array(analyser.fftSize);
+                candidate.connect(masterGain);
+                masterGain.connect(analyser);
+                analyser.connect(context.destination);
+                return candidate.isReady;
+            }, workletFailure);
 
-        const sfResp = await fetch(new URL('../../soundfont.sf2', import.meta.url));
-        if (!sfResp.ok) throw new Error(`SoundFont HTTP ${sfResp.status}`);
-        const sfBuffer = await sfResp.arrayBuffer();
-        report(0.40);
+            const sfBuffer = await audioStep('Downloading SoundFont', 60000, async () => {
+                const response = await fetch(new URL('../../soundfont.sf2', import.meta.url), { signal: download.signal });
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                return response.arrayBuffer();
+            }, workletFailure);
+            await audioStep('Installing SoundFont', 20000, () => candidate.soundBankManager.addSoundBank(sfBuffer, 'main-sf2', 0), workletFailure);
 
-        await synth.soundBankManager.addSoundBank(sfBuffer, 'main-sf2', 0);
-        report(0.95);
-
-        masterGain = ctx.createGain();
-        masterGain.gain.value = volume;
-        analyser = ctx.createAnalyser();
-        analyser.fftSize = 2048;
-        sampleFrame = new Float32Array(analyser.fftSize);
-        synth.connect(masterGain);
-        masterGain.connect(analyser);
-        analyser.connect(ctx.destination);
-        seq = new Sequencer(synth, { skipToFirstNoteOn: false });
-        previewSeq = new Sequencer(synth, { skipToFirstNoteOn: false });
-        report(1);
-
-        if (overlay) {
-            overlay.classList.add('hidden');
-            setTimeout(() => overlay.remove(), 300);
+            seq = new Sequencer(candidate, { skipToFirstNoteOn: false });
+            previewSeq = new Sequencer(candidate, { skipToFirstNoteOn: false });
+            synth = candidate;
+            reportAudio('ready', `Audio ready · ${context.sampleRate / 1000} kHz`);
+        } catch (error) {
+            try { candidate?.destroy(); } catch {}
+            if (context && context.state !== 'closed') context.close().catch(() => {});
+            ctx = synth = seq = previewSeq = masterGain = analyser = sampleFrame = null;
+            reportAudio('error', error?.message ?? String(error));
+            throw error;
+        } finally {
+            download.abort();
+            node?.removeEventListener('processorerror', onProcessorError);
         }
-        return { ctx, synth, seq };
-    })();
+    };
 
-    readyPromise.catch(() => { readyPromise = null; }); // разрешаем retry
+    readyPromise = init().finally(() => { readyPromise = null; });
     return readyPromise;
 }
 

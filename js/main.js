@@ -1,6 +1,6 @@
 // js/main.js
 import { log, setStatus, wireGlobalErrorHandlers } from './core/log.js';
-import { initSynth, getAudioContext, getSequencer, getOutputLevel, getMasterVolume, getSynth } from './core/synth.js';
+import { initSynth, onAudioStatus, getAudioContext, getSequencer, getOutputLevel, getMasterVolume, getSynth } from './core/synth.js';
 import { Playlist } from './playlist.js';
 import { mountMenubar } from './ui/menubar.js';
 import { mountPlayerOverlay } from './ui/playerOverlay.js';
@@ -89,39 +89,36 @@ function openMidiBuffer(buffer, name) {
     setStatus(totalNotes ? `Loaded: ${name}${substitutes ? ` · ${substitutes} sound fallback(s)` : ''}` : `No editable notes: ${name}`);
 }
 
-async function bootAudio() {
-    setStatus('Loading soundfont…');
-    const initBar  = document.getElementById('initBar');
-    const initFill = document.getElementById('initFill');
-    if (initBar) initBar.style.display = 'block';
-
-    await initSynth({
-        onProgress: (p) => {
-            if (initFill) initFill.style.width = `${Math.round(p * 100)}%`;
-        },
+function mountAudioStatus() {
+    const button = document.getElementById('audioUnlock');
+    const statuses = [document.getElementById('audioState'), document.getElementById('ptAudioState')];
+    button.addEventListener('click', () => initSynth().catch(() => {}));
+    onAudioStatus(({ state, message }) => {
+        for (const status of statuses) {
+            status.textContent = status.title = message;
+            status.dataset.state = state;
+        }
+        button.disabled = state === 'loading';
+        button.hidden = state === 'ready';
+        button.textContent = state === 'error' ? 'Retry audio' : 'Enable audio';
+        if (state !== 'idle') log(`Audio: ${message}`, state === 'error' ? 'error' : 'info');
+        if (state === 'ready') refreshAll();
     });
 
-    const ctx = getAudioContext();
-    if (!ctx) throw new Error('AudioContext unavailable');
-
-    setStatus('Ready');
     const meters = [...document.querySelectorAll('.audio-meter')];
     let level = 0;
     setInterval(() => {
         level = Math.max(getOutputLevel(), level * 0.75);
+        const context = getAudioContext();
         const description = getMasterVolume() === 0 ? 'Master volume is zero'
-            : ctx.state !== 'running' ? `Audio output is ${ctx.state}. Click Play to resume.`
-            : `Audio output · ${ctx.sampleRate / 1000} kHz`;
+            : !context ? statuses[0].textContent
+            : context.state !== 'running' ? `Audio output is ${context.state}. Click Play to resume.`
+            : `Audio output · ${context.sampleRate / 1000} kHz`;
         for (const meter of meters) {
             meter.value = Math.min(1, Math.sqrt(level));
             meter.title = description;
         }
     }, 80);
-    if (initBar) initBar.style.display = 'none';
-	
-	refreshAll();
-	document.getElementById('logPanel')?.classList.add('collapsed');
-	requestAnimationFrame(() => window.dispatchEvent(new Event('resize')));
 }
 
 // ---------------- Piano roll ----------------
@@ -365,12 +362,8 @@ const playerOverlay = mountPlayerOverlay({
 // ---------------- Init UI ----------------
 await playlist.load();
 
-bootAudio().catch(err => {
-    document.getElementById('audioUnlock')?.classList.add('hidden');
-    document.getElementById('initBar')?.style.setProperty('display', 'none');
-    log(`Audio unavailable: ${err}`, 'error');
-    setStatus('Audio unavailable');
-});
+mountAudioStatus();
+logPanel?.classList.add('collapsed');
 
 log('main: shell ready');
 
