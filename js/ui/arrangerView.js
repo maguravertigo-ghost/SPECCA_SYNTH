@@ -850,11 +850,32 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
         updateTransportUI();
     };
 
+    const goHome = () => {
+        const seq = loadedSequence === getSeq() ? getSequencer() : null;
+        const keepPlaying = loading || (!!seq && !seq.paused && !seq.isFinished);
+        // An explicit restart leaves a partial loop without throwing its markers away.
+        // A whole-track loop can stay on: it does not trap the transport after Home.
+        if (hasLoop() && (state.loopStartTick > 0 || effectiveLoopEnd() < playableDurationTick())) {
+            state.loopEnabled = false;
+            if (seq) seq.loopCount = 0;
+            markDirty();
+        }
+        clearTimeout(reloadTimer); reloadPending = false;
+        // Supersede any queued edit reload or seek. Reload from tick zero on Play
+        // instead of reusing the live sequencer's old position and controller state.
+        if (loading) { playbackRequest++; loading = false; }
+        playbackDirty = true;
+        body.scrollLeft = 0;
+        seekingUntil = performance.now() + 100;
+        seekTick(0, false, false);
+        if (keepPlaying) play();
+    };
+
     playBtn?.addEventListener('click', () => play());
     $('#arrMixer')?.addEventListener('click', () => onMixer?.());
     pauseBtn?.addEventListener('click', pause);
     $('#arrStop')?.addEventListener('click', () => stop(true));
-    $('#arrHome')?.addEventListener('click', () => { body.scrollLeft = 0; seekTick(0, true); });
+    $('#arrHome')?.addEventListener('click', goHome);
     $('#arrEnd')?.addEventListener('click', () => seekTick(playableDurationTick() || arrangementDurationTick(), true));
     loopAllBtn.addEventListener('click', () => {
         if (!playableDurationTick()) return;
