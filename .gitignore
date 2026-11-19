@@ -8,6 +8,7 @@ soundfont.sf2
 # Зависимости и временные файлы
 node_modules/
 supermium-profile/
+project_extraction/
 port.txt
 server.log
 *.log
