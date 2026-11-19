@@ -1,7 +1,10 @@
 // js/editor/pianoRoll.js
+import { getInstrumentLabel, mountInstrumentFields } from '../ui/instrumentFields.js';
+import { instrumentFamily } from './instruments.js';
 import { log } from '../core/log.js';
-import { writeMIDIFromSequence } from './exportMidi.js';
-import { getSynth, getAudioContext, getSequencer, resumeAudio, loadSong, applyChannelMix, setMasterVolume } from '../core/synth.js';
+import { copyNotes, planPaste } from './noteClipboard.js';
+import { writePatternMIDI } from './exportMidi.js';
+import { getSequencer, resumeAudio, loadSong, applyChannelMix, bindMasterVolume } from '../core/synth.js';
 
 const NOTE_NAMES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
 const BLACK_KEYS = new Set([1,3,6,8,10]);
@@ -18,47 +21,6 @@ const DRUM_NAMES = {
     80:'TriMute',81:'TriOpen',
 };
 
-const LAYER_DEFS = [
-    { id:'drums',   name:'DRUMS',   color:'#888888', channel:9, isDrum:true,  pitchMin:35, pitchMax:81, defaultProgram:0,
-      presets:[
-        {name:'Standard',   program:0},  {name:'Room',       program:8},
-        {name:'Power',      program:16}, {name:'Electronic', program:24},
-        {name:'TR-808',     program:25}, {name:'Jazz',       program:32},
-        {name:'Brush',      program:40}, {name:'Orchestra',  program:48},
-      ]},
-    { id:'piano',   name:'PIANO',   color:'#4ec9b0', channel:0, isDrum:false, pitchMin:48, pitchMax:83, defaultProgram:0,
-      presets:[
-        {name:'Grand Piano',    program:0}, {name:'Bright Piano',   program:1},
-        {name:'Electric Piano', program:4}, {name:'Harpsichord',    program:6},
-        {name:'Organ',          program:19},{name:'Nylon Guitar',   program:24},
-        {name:'Steel Guitar',   program:25},
-      ]},
-    { id:'bass',    name:'BASS',    color:'#dcdcaa', channel:1, isDrum:false, pitchMin:36, pitchMax:60, defaultProgram:33,
-      presets:[
-        {name:'Finger Bass',  program:33}, {name:'Picked Bass',  program:34},
-        {name:'Slap Bass',    program:36}, {name:'Synth Bass 1', program:38},
-        {name:'Synth Bass 2', program:39},
-      ]},
-    { id:'strings', name:'STRINGS', color:'#c586c0', channel:2, isDrum:false, pitchMin:48, pitchMax:83, defaultProgram:48,
-      presets:[
-        {name:'String Ensemble', program:48}, {name:'Slow Strings',  program:49},
-        {name:'Pizzicato',       program:45}, {name:'Tremolo',       program:44},
-        {name:'Viola',           program:41}, {name:'Cello',         program:42},
-      ]},
-    { id:'brass',   name:'BRASS',   color:'#ce9178', channel:3, isDrum:false, pitchMin:48, pitchMax:83, defaultProgram:61,
-      presets:[
-        {name:'Brass Section', program:61}, {name:'Trumpet',  program:56},
-        {name:'Trombone',      program:57}, {name:'Sax',      program:65},
-        {name:'Flute',         program:73}, {name:'Clarinet', program:71},
-      ]},
-    { id:'fx',      name:'FX',      color:'#569cd6', channel:4, isDrum:false, pitchMin:48, pitchMax:83, defaultProgram:120,
-      presets:[
-        {name:'FX 1 (Rain)',       program:120}, {name:'FX 2 (Soundtrack)',program:121},
-        {name:'FX 3 (Crystal)',    program:122}, {name:'FX 4 (Atmosphere)',program:123},
-        {name:'FX 5 (Brightness)', program:124}, {name:'FX 6 (Goblins)',   program:125},
-      ]},
-];
-
 const DUR_BUTTONS = [
     { label:'1', mult:1 },
     { label:'2', mult:2 },
@@ -69,22 +31,26 @@ const DUR_BUTTONS = [
 const HEADER_H = 20;
 const LABEL_W  = 64;
 const ROW_H    = 20;
-const MIN_CELL_W = 18;
+const MIN_CELL_W = 6;
 
 export function mountPianoRoll(rootEl, opts = {}) {
     if (!rootEl) return null;
 
     const {
         getSequence,
-        getActivePatternId,
-        onNoteChange,
-        onRequestNewSequence,
+        getChannelPattern,
+        onPatternSelect,
+        onInstrumentChange,
         onBackToArranger,
     } = opts;
 
     rootEl.innerHTML = `
         <div class="pr-shell">
-            <div class="pr-layer-bar" id="prLayerBar"></div>
+            <div class="pr-layer-bar">
+                <strong id="prChannelName"></strong>
+                <label id="prPatternField" class="pr-num" hidden><span>Pattern</span> <select id="prPatternSelect"></select></label>
+                <button id="prInstrumentBtn" class="pr-t-btn" type="button">Instrument…</button>
+            </div>
             <div class="pr-toolbar">
 			    <button id="prBackBtn" class="pr-t-btn" type="button" title="Back to Arranger">← Arranger</button>
                 <span class="pr-sep"></span>
@@ -94,17 +60,19 @@ export function mountPianoRoll(rootEl, opts = {}) {
                 </label>
                 <span class="pr-sep"></span>
 				<span class="pr-sep"></span>
-                <button id="prPlayBtn" class="pr-t-btn" type="button" title="Play">▶</button>
+                <button id="prHomeBtn" class="pr-t-btn" type="button" aria-label="To start" title="To start">⏮</button>
+                <button id="prPlayBtn" class="pr-t-btn" type="button" title="Play / pause" aria-label="Play / pause">▶</button>
                 <button id="prStopBtn" class="pr-t-btn" type="button" title="Stop">⏹</button>
+                <button id="prEndBtn" class="pr-t-btn" type="button" aria-label="To end" title="To end">⏭</button>
                 <button id="prLoopBtn" class="pr-t-btn active" type="button" title="Loop">LOOP</button>
-                <button id="prModeBtn" class="pr-t-btn" type="button" title="Track (all layers) / Solo (current)">Track</button>
                 <span class="pr-sep"></span>
                 <span class="pr-dur-label">Dur:</span>
                 <div class="pr-dur-group" id="prDurGroup"></div>
                 <span class="pr-sep"></span>
-                <button id="prClearBtn" class="btn btn-ghost" type="button" title="Clear current layer">🗑 Clear</button>
+                <button id="prClearBtn" class="btn btn-ghost" type="button" title="Clear current pattern">🗑 Clear</button>
             </div>
-            <div class="pr-canvas-wrap"><canvas id="prCanvas"></canvas></div>
+            <div class="pr-canvas-wrap"><canvas id="prCanvas" tabindex="0" aria-label="Piano roll. Click its ruler to position playback or paste."></canvas></div>
+            <div id="prEditStatus" class="pr-edit-status" role="status">Ctrl/Cmd+C, X, V · Click the ruler to position playback or paste</div>
             <div class="pr-scrollbar hidden" id="prScrollBar">
                 <input id="prScrollInput" type="range" min="0" max="1000" value="0" step="1">
             </div>
@@ -114,15 +82,12 @@ export function mountPianoRoll(rootEl, opts = {}) {
     const $ = (s) => rootEl.querySelector(s);
     const canvas     = $('#prCanvas');
     const wrap       = canvas.parentElement;
-    const layerBar   = $('#prLayerBar');
+    const instrumentBtn = $('#prInstrumentBtn');
+    const patternSelect = $('#prPatternSelect');
     const playBtn    = $('#prPlayBtn');
     const stopBtn    = $('#prStopBtn');
     const loopBtn    = $('#prLoopBtn');
-    const modeBtn    = $('#prModeBtn');
     const durGroup   = $('#prDurGroup');
-    const bpmInput   = $('#prBpm');
-    const barsInput  = $('#prBars');
-    const stepsInput = $('#prSteps');
     const clearBtn   = $('#prClearBtn');
     const scrollBar  = $('#prScrollBar');
     const scrollInput= $('#prScrollInput');
@@ -132,12 +97,9 @@ export function mountPianoRoll(rootEl, opts = {}) {
     // State
     // ------------------------------------------------------------------
     const state = {
-        activeLayerIdx: 1,
-        activePatternId: null,
+        channel: null,
+        visible: false,
         durMult: 1,
-        stepsPerBar: 16,
-        barsPerLoop: 4,
-        playMode: 'track',      // 'track' | 'solo'
         loopEnabled: true,
         tool: 'pencil',          // 'cross' | 'pencil'
         zoom: 1,                // 1 = fit, до 4
@@ -147,38 +109,41 @@ export function mountPianoRoll(rootEl, opts = {}) {
         drag: null,
 		rect: null,      // {x0, y0, x1, y1, add: boolean}
         playing: false,
+        loading: false,
+        pasteCursor: null,
+        cursorTick: 0,
+        secondsPerTick: 0,
     };
     let dpr = Math.max(1, window.devicePixelRatio || 1);
     let dirty = true;
     let rafId = 0;
     let hotReloadTimer = null;
+    let playbackRequest = 0;
+    let seekingUntil = 0;
+    let clipboard = null;
 
-    const getSeq     = () => (typeof getSequence === 'function' ? getSequence() : null);
-    const getChannel = () => LAYER_DEFS[state.activeLayerIdx].channel;
-    const getLayer   = () => LAYER_DEFS[state.activeLayerIdx];
+    const getSeq = () => getSequence?.();
+    const getChannel = () => state.channel;
+    const getChannelInfo = () => getSeq()?.channels.find(c => c.channel === getChannel());
+    const getPattern = () => getChannelPattern?.(getChannel()) ?? null;
     const getTimeDiv = () => getSeq()?.timeDivision || 480;
-    const stepTicks  = () => Math.max(1, Math.round(getTimeDiv() / 4));
-    const durTicks   = () => Math.max(1, stepTicks() * state.durMult);
-    const totalSteps = () => state.stepsPerBar * state.barsPerLoop;
-    const loopTicks  = () => totalSteps() * stepTicks();
+    const stepTicks = () => Math.max(1, Math.round(getTimeDiv() / 4));
+    const stepsPerBar = () => getSeq()?.stepsPerBar || 16;
+    const loopTicks = () => Math.max(1, getPattern()?.lengthTicks ?? getTimeDiv() * 4);
+    const totalSteps = () => Math.ceil(loopTicks() / stepTicks());
+    const durTicks = () => Math.max(1, stepTicks() * state.durMult);
 
-    const getPattern = () => {
-        const seq = getSeq();
-        if (!seq) return null;
-        const id = state.activePatternId ?? getActivePatternId?.() ?? seq.patterns?.[0]?.id;
-        return seq.patterns?.find(p => p.id === id) || seq.patterns?.[0] || null;
+    const layer = () => {
+        const channel = getChannelInfo();
+        const isDrum = !!channel?.isDrum;
+        let pitchMin = isDrum ? 27 : 0;
+        let pitchMax = isDrum ? 87 : 127;
+        if (isDrum) for (const note of getPattern()?.notes ?? []) {
+            pitchMin = Math.min(pitchMin, note.key);
+            pitchMax = Math.max(pitchMax, note.key);
+        }
+        return { isDrum, pitchMin, pitchMax, color: channel?.color || '#4ec9b0' };
     };
-
-    const syncPatternLength = () => {
-        const seq = getSeq();
-        if (!seq) return;
-        for (const p of (seq.patterns || [])) p.lengthTicks = loopTicks();
-    };
-
-    // ------------------------------------------------------------------
-    // Geometry
-    // ------------------------------------------------------------------
-    const layer   = () => getLayer();
     const pitches = () => {
         const a = [];
         for (let p = layer().pitchMax; p >= layer().pitchMin; p--) a.push(p);
@@ -192,7 +157,7 @@ export function mountPianoRoll(rootEl, opts = {}) {
     const baseCellW = () => {
         const avail = wrap.clientWidth - LABEL_W;
         const n = totalSteps();
-        return n > 0 ? Math.max(1, avail / n) : 40;
+        return n > 0 ? Math.max(MIN_CELL_W, avail / n) : 40;
     };
     const cellW = () => baseCellW() * state.zoom;
     const maxScrollX = () => {
@@ -204,7 +169,6 @@ export function mountPianoRoll(rootEl, opts = {}) {
         state.scrollX = Math.max(0, Math.min(state.scrollX, maxScrollX()));
     };
 
-    const tickToX = (tick) => LABEL_W + tick / stepTicks() * cellW() - state.scrollX;
     const xToStep = (x)     => Math.floor((x - LABEL_W + state.scrollX) / cellW());
     const stepToX = (s)     => LABEL_W + s * cellW() - state.scrollX;
 
@@ -258,7 +222,9 @@ export function mountPianoRoll(rootEl, opts = {}) {
         const ps = pitches();
         const cw = cellW();
         const ts = totalSteps();
-        const spb = state.stepsPerBar;
+        const spb = stepsPerBar();
+        const firstStep = Math.max(0, xToStep(LABEL_W));
+        const lastStep = Math.min(ts, xToStep(w) + 1);
 
         // Zebra cell backgrounds
         ctx.save();
@@ -272,7 +238,7 @@ export function mountPianoRoll(rootEl, opts = {}) {
             if (y + ROW_H < HEADER_H || y > h) continue;
             const isBlack = !layer().isDrum && BLACK_KEYS.has(p % 12);
 
-            for (let s = 0; s < ts; s++) {
+            for (let s = firstStep; s < lastStep; s++) {
                 const barIdx = Math.floor(s / spb);
                 const x = stepToX(s);
                 if (x + cw < LABEL_W || x > w) continue;
@@ -286,7 +252,7 @@ export function mountPianoRoll(rootEl, opts = {}) {
 
         // Grid lines
         ctx.lineWidth = 1;
-        for (let s = 0; s <= ts; s++) {
+        for (let s = firstStep; s <= lastStep; s++) {
             const x = Math.round(stepToX(s)) + 0.5;
             if (x < LABEL_W || x > w) continue;
             ctx.strokeStyle = (s % spb === 0) ? 'rgba(180,180,200,0.45)' : 'rgba(0,0,0,0.9)';
@@ -311,7 +277,7 @@ export function mountPianoRoll(rootEl, opts = {}) {
         // Notes (только активный канал)
         const p = getPattern();
         const chn = getChannel();
-        const layerColor = getLayer().color;
+        const layerColor = layer().color;
         if (p?.notes) {
             for (const n of p.notes) {
                 if (n.track !== chn) continue;
@@ -332,45 +298,18 @@ export function mountPianoRoll(rootEl, opts = {}) {
             }
         }
 
-        // Playhead
-        const sequencer = getSequencer();
-        if (sequencer && !sequencer.paused && !sequencer.isFinished) {
-            const dur = sequencer.duration;
-            if (dur > 0) {
-                const pos = Math.max(0, Math.min(1, sequencer.currentTime / dur));
-                const totalW = cw * ts;
-                const phX = LABEL_W + pos * totalW - state.scrollX;
-                if (phX >= LABEL_W && phX <= w) {
-                    ctx.strokeStyle = '#ff4081';
-                    ctx.lineWidth = 2;
-                    ctx.beginPath();
-                    ctx.moveTo(phX, HEADER_H);
-                    ctx.lineTo(phX, h);
-                    ctx.stroke();
-                    // маленький треугольник сверху
-                    ctx.fillStyle = '#ff4081';
-                    ctx.beginPath();
-                    ctx.moveTo(phX - 5, HEADER_H);
-                    ctx.lineTo(phX + 5, HEADER_H);
-                    ctx.lineTo(phX, HEADER_H + 8);
-                    ctx.fill();
-                }
-            }
+        const phX = stepToX(state.cursorTick / stepTicks());
+        if (phX >= LABEL_W && phX <= w) {
+            ctx.strokeStyle = '#ff4081';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(phX, HEADER_H);
+            ctx.lineTo(phX, h);
+            ctx.stroke();
+
         }
-		// Selection rectangle
-        if (state.rect) {
-            const r = state.rect;
-            const x0 = Math.min(r.x0, r.x1), y0 = Math.min(r.y0, r.y1);
-            const w  = Math.abs(r.x1 - r.x0), h = Math.abs(r.y1 - r.y0);
-            ctx.strokeStyle = '#4a9eff';
-            ctx.lineWidth = 1;
-            ctx.setLineDash([4, 3]);
-            ctx.strokeRect(x0 + 0.5, y0 + 0.5, w, h);
-            ctx.setLineDash([]);
-            ctx.fillStyle = 'rgba(74,158,255,0.12)';
-            ctx.fillRect(x0, y0, w, h);
-        }
-		        // Selection rectangle (blue)
+
+                // Selection rectangle (blue)
         if (state.rect) {
             const r = state.rect;
             const x0 = Math.min(r.x0, r.x1), y0 = Math.min(r.y0, r.y1);
@@ -432,7 +371,7 @@ export function mountPianoRoll(rootEl, opts = {}) {
         ctx.lineTo(w, HEADER_H - 0.5);
         ctx.stroke();
         ctx.font = 'bold 11px -apple-system, sans-serif';
-        for (let bar = 0; bar < state.barsPerLoop; bar++) {
+        for (let bar = Math.floor(firstStep / spb); bar * spb < lastStep; bar++) {
             const stepIdx = bar * spb;
             const x = stepToX(stepIdx);
             if (x + cw < LABEL_W || x > w) continue;
@@ -449,6 +388,28 @@ export function mountPianoRoll(rootEl, opts = {}) {
             ctx.lineTo(x + 0.5, HEADER_H);
             ctx.stroke();
         }
+        if (state.pasteCursor != null && Math.abs(state.pasteCursor - state.cursorTick) > stepTicks() / 2) {
+            const cursorX = stepToX(state.pasteCursor / stepTicks());
+            if (cursorX >= LABEL_W && cursorX <= w) {
+                ctx.fillStyle = '#ffcd70';
+                ctx.fillRect(cursorX, 0, 2, HEADER_H);
+            }
+        }
+        // Draw the playback marker over the ruler, in the same color as the grid playhead.
+        if (phX >= LABEL_W && phX <= w) {
+            ctx.save();
+            ctx.beginPath();
+            ctx.rect(LABEL_W, 0, w - LABEL_W, HEADER_H);
+            ctx.clip();
+            ctx.fillStyle = '#ff4081';
+            ctx.fillRect(phX - 1, 0, 2, HEADER_H);
+            ctx.beginPath();
+            ctx.moveTo(phX - 5, HEADER_H - 7);
+            ctx.lineTo(phX + 5, HEADER_H - 7);
+            ctx.lineTo(phX, HEADER_H);
+            ctx.fill();
+            ctx.restore();
+        }
         // угол
         ctx.fillStyle = '#0a0a10';
         ctx.fillRect(0, 0, LABEL_W, HEADER_H);
@@ -457,8 +418,22 @@ export function mountPianoRoll(rootEl, opts = {}) {
     };
 
     const frame = () => {
-        if (dirty) { dirty = false; draw(); }
-        else if (state.playing) draw();   // playhead анимируется
+        const seq = getSequencer();
+        if (state.playing && !state.loading && seq?.isFinished) {
+            state.cursorTick = loopTicks();
+            state.playing = false;
+            playBtn.classList.remove('active');
+            playBtn.textContent = '▶';
+            dirty = true;
+        }
+        if (state.playing && !state.loading && !seq?.paused && state.secondsPerTick && performance.now() >= seekingUntil) {
+            state.cursorTick = Math.max(0, Math.min(loopTicks(), seq.currentTime / state.secondsPerTick));
+        }
+        if (state.visible && (dirty || state.playing)) {
+            canvas.dataset.playheadTick = String(Math.round(state.cursorTick));
+            dirty = false;
+            draw();
+        }   // playhead анимируется
         rafId = requestAnimationFrame(frame);
     };
 
@@ -483,7 +458,7 @@ export function mountPianoRoll(rootEl, opts = {}) {
         if (findNoteAt(step, key)) return null;
         const seq = getSeq();
         const p = getPattern();
-        if (!seq || !p) { onRequestNewSequence?.(); return null; }
+        if (!seq || !p) return null;
         const dur = Math.min(durTicks(), loopTicks() - step * stepTicks());
         if (dur <= 0) return null;
         p.notes = p.notes || [];
@@ -516,75 +491,59 @@ export function mountPianoRoll(rootEl, opts = {}) {
     // Hot reload (применяем изменения на лету)
     // ------------------------------------------------------------------
     const scheduleHotReload = () => {
-        syncPatternLength();
         dirty = true;
         if (hotReloadTimer) clearTimeout(hotReloadTimer);
         hotReloadTimer = setTimeout(() => {
-            if (state.playing) pushToSequencer(true).catch(err => log(`hot-reload failed: ${err}`, 'error'));
+            if (!state.playing) return;
+            if (!getPattern()?.notes.length) stop();
+            else pushToSequencer(true).catch(err => log(`hot-reload failed: ${err}`, 'error'));
         }, 200);
     };
 
     const pushToSequencer = async (keepPlaying = false) => {
         const seq = getSeq();
         const sequencer = getSequencer?.();
-        if (!seq || !sequencer) return;
+        const pattern = getPattern();
+        if (!seq || !sequencer || !pattern?.notes.length || !state.visible || rootEl.inert || state.loading) return;
+        const request = ++playbackRequest;
+        state.loading = playBtn.disabled = true;
         try {
             await resumeAudio();
 
-            // --- сохраняем позицию для live editing ---
-            const wasPlaying = !sequencer.paused && !sequencer.isFinished;
-            const savedTime  = wasPlaying ? Math.max(0, sequencer.currentTime) : 0;
-
-            const activeChannel = state.playMode === 'solo' ? getChannel() : null;
-            const midi = writeMIDIFromSequence(seq, {
-                playMode: state.playMode,
-                activeChannel,
-                useAnchor: true,
-                stepsPerBar: state.stepsPerBar,
-                barsPerLoop: state.barsPerLoop,
-            });
-            await loadSong(midi, 'pattern');
-			
-			applyChannelMix(seq);
-			
+            if (request !== playbackRequest) return;
+            const startTick = seq.arrangement.find(p => p.patternId === pattern.id)?.startTick ?? 0;
+            const midi = writePatternMIDI(seq, pattern.id, startTick);
+            if (!await loadSong(midi, pattern.name, sequencer, () => request === playbackRequest && state.visible && !rootEl.inert)) return;
+            // Program, volume and pan are already encoded in the pattern MIDI.
             sequencer.loopCount = state.loopEnabled ? Infinity : 0;
+            state.secondsPerTick = 60 / (seq.tempoAt(startTick) * seq.timeDivision);
 
             if (keepPlaying || state.playing) {
-                // возвращаем плейхед на то же место — нота зазвучит в следующем проходе
-                if (wasPlaying && savedTime > 0) {
-                    try { sequencer.currentTime = savedTime; } catch {}
-                }
+                if (state.cursorTick >= loopTicks()) state.cursorTick = 0;
+                if (state.cursorTick > 0) sequencer.currentTime = Math.min(sequencer.duration, state.cursorTick * state.secondsPerTick);
+                seekingUntil = performance.now() + 100;
                 sequencer.play();
                 state.playing = true;
                 playBtn.classList.add('active');
                 playBtn.textContent = '❚❚';
             }
         } catch (err) {
-            log(`pushToSequencer: ${err}`, 'error');
+            if (request === playbackRequest) { $('#prEditStatus').textContent = err.message; log(`Pattern play: ${err}`, 'error'); }
+        } finally {
+            if (request === playbackRequest) state.loading = playBtn.disabled = false;
         }
     };
 
-    const play = async () => {
-        const seq = getSeq();
-        if (!seq) { onRequestNewSequence?.(); return; }
-        try {
-            await pushToSequencer(true);
-            if (!state.playing) {
-                // если pushToSequencer не запустил (пустой паттерн) — всё равно жмём play
-                getSequencer()?.play();
-                state.playing = true;
-                playBtn.classList.add('active');
-                playBtn.textContent = '❚❚';
-            }
-        } catch (err) {
-            log(`play: ${err}`, 'error');
-        }
-    };
+    const play = () => pushToSequencer(true);
 
-    const stop = () => {
+    const stop = (rewind = true) => {
+        playbackRequest++;
+        if (rewind) state.cursorTick = 0;
+        state.loading = playBtn.disabled = false;
+        clearTimeout(hotReloadTimer);
         const sequencer = getSequencer?.();
         if (sequencer) {
-            try { sequencer.pause(); sequencer.currentTime = 0; } catch {}
+            try { sequencer.pause(); if (rewind) sequencer.currentTime = 0; } catch {}
         }
         state.playing = false;
         playBtn.classList.remove('active');
@@ -594,11 +553,32 @@ export function mountPianoRoll(rootEl, opts = {}) {
 
     const togglePlay = async () => {
         if (state.playing) {
-            stop();
+            stop(false);
         } else {
             await play();
         }
     };
+
+    const seekTick = (tick, reveal = false) => {
+        if (!getPattern()) return;
+        state.cursorTick = Math.max(0, Math.min(loopTicks(), Math.round(tick)));
+        const seq = getSequencer();
+        if (seq && state.playing && !state.loading && state.secondsPerTick) {
+            seekingUntil = performance.now() + 100;
+            seq.currentTime = Math.min(seq.duration, state.cursorTick * state.secondsPerTick);
+        }
+        if (reveal) {
+            const x = stepToX(state.cursorTick / stepTicks());
+            if (x < LABEL_W || x > wrap.clientWidth) {
+                state.scrollX = state.cursorTick / stepTicks() * cellW();
+                clampScroll();
+                updateScrollbar();
+            }
+        }
+        dirty = true;
+    };
+    $('#prHomeBtn').addEventListener('click', () => seekTick(0, true));
+    $('#prEndBtn').addEventListener('click', () => seekTick(loopTicks(), true));
 
     // ------------------------------------------------------------------
     // Hit test
@@ -641,7 +621,22 @@ export function mountPianoRoll(rootEl, opts = {}) {
         const rect = canvas.getBoundingClientRect();
         const mx = e.clientX - rect.left;
         const my = e.clientY - rect.top;
-        if (mx < LABEL_W || my < HEADER_H) return;
+        if (mx < LABEL_W) return;
+        canvas.focus({ preventScroll: true });
+        if (my < HEADER_H) {
+            if (e.button === 0) {
+                e.preventDefault();
+                const step = xToStep(mx);
+                if (step < totalSteps()) {
+                    state.pasteCursor = Math.min(loopTicks(), step * stepTicks());
+                    seekTick(state.pasteCursor);
+                    $('#prEditStatus').textContent = `Position: bar ${Math.floor(step / stepsPerBar()) + 1}, step ${step % stepsPerBar() + 1}`;
+                    dirty = true;
+                }
+            }
+            return;
+        }
+        if (e.button === 0) state.pasteCursor = null;
 
         const hit = hitTestNote(mx, my);
 
@@ -878,84 +873,75 @@ export function mountPianoRoll(rootEl, opts = {}) {
     };
 
     // ------------------------------------------------------------------
-    // Layer bar
+    // Channel/pattern header and instrument picker
     // ------------------------------------------------------------------
-    const buildLayerBar = () => {
-        layerBar.innerHTML = '';
-        LAYER_DEFS.forEach((def, idx) => {
-            const btn = document.createElement('button');
-            btn.type = 'button';
-            btn.className = 'pr-layer-btn' + (idx === state.activeLayerIdx ? ' active' : '');
-            btn.style.background = def.color;
-            btn.dataset.idx = idx;
-            btn.textContent = def.name;
-            let pressTimer = null, longPressed = false;
-            btn.addEventListener('pointerdown', () => {
-                longPressed = false;
-                pressTimer = setTimeout(() => { longPressed = true; openPresetPicker(idx); }, 500);
-            });
-            const clear = () => { if (pressTimer) { clearTimeout(pressTimer); pressTimer = null; } };
-            btn.addEventListener('pointerup', () => { clear(); if (!longPressed) selectLayer(idx); });
-            btn.addEventListener('pointerleave', clear);
-            btn.addEventListener('pointercancel', clear);
-            btn.addEventListener('contextmenu', (e) => { e.preventDefault(); openPresetPicker(idx); });
-            layerBar.appendChild(btn);
-        });
+    const refreshHeader = () => {
+        const channel = getChannelInfo();
+        const pattern = getPattern();
+        $('#prChannelName').textContent = channel ? channel.name || `Ch ${channel.channel + 1}` : 'Piano Roll';
+        instrumentBtn.textContent = channel ? `Instrument: ${getInstrumentLabel(channel)}` : 'Instrument…';
+        instrumentBtn.title = channel ? instrumentFamily(channel) : '';
+        instrumentBtn.disabled = !channel;
+        const patterns = getSeq()?.patterns.filter(p => p.channel === state.channel) ?? [];
+        $('#prPatternField').hidden = patterns.length < 2;
+        patternSelect.replaceChildren(...patterns.map(p => new Option(p.name, p.id)));
+        if (pattern) patternSelect.value = pattern.id;
     };
-    const refreshLayerBar = () => {
-        [...layerBar.children].forEach((b, i) => b.classList.toggle('active', i === state.activeLayerIdx));
-    };
-    const selectLayer = (idx) => {
-        state.activeLayerIdx = idx;
+    const resetViewport = () => {
         state.selection.clear();
+        state.drag = null;
+        state.rect = null;
         state.scrollX = 0;
-        refreshLayerBar();
+        state.pasteCursor = null;
+        if (!state.playing) state.cursorTick = 0;
+        const keys = getPattern()?.notes.map(n => n.key).sort((a, b) => a - b) ?? [];
+        const middle = keys[Math.floor(keys.length / 2)] ?? (layer().isDrum ? 45 : 60);
+        state.scrollY = Math.max(0, (layer().pitchMax - middle) * ROW_H - wrap.clientHeight / 2);
+        clampScrollY();
         updateScrollbar();
         dirty = true;
     };
+    patternSelect.addEventListener('change', () => {
+        stop();
+        onPatternSelect?.(state.channel, patternSelect.value);
+        refreshHeader();
+        resetViewport();
+    });
 
-    // ------------------------------------------------------------------
-    // Preset picker
-    // ------------------------------------------------------------------
     let pickerEl = null;
-    const openPresetPicker = (idx) => {
-        const seq = getSeq();
-        if (!seq) return;
-        const def = LAYER_DEFS[idx];
-        const ch = seq.channels?.find(c => c.channel === def.channel);
-        if (!ch) return;
-
-        if (!pickerEl) {
-            pickerEl = document.createElement('div');
-            pickerEl.className = 'pr-picker-overlay hidden';
-            pickerEl.innerHTML = `
-                <div class="pr-picker-box">
-                    <div class="pr-picker-title" id="prPickerTitle"></div>
-                    <div class="pr-picker-list" id="prPickerList"></div>
-                    <button class="btn btn-primary pr-picker-close" id="prPickerClose" type="button">Cancel</button>
+    instrumentBtn.addEventListener('click', () => {
+        const channel = getChannelInfo();
+        if (!channel) return;
+        pickerEl?.remove();
+        const dialog = document.createElement('dialog');
+        pickerEl = dialog;
+        dialog.className = 'arr-dialog-box pr-instrument-dialog';
+        dialog.innerHTML = `
+            <form method="dialog">
+                <h2 class="arr-dialog-title">Channel instrument</h2>
+                <div class="arr-dialog-body" data-instrument-fields></div>
+                <div class="arr-dialog-footer">
+                    <button class="btn" value="cancel">Cancel</button>
+                    <button class="btn btn-primary" value="apply">Apply</button>
                 </div>
-            `;
-            document.body.appendChild(pickerEl);
-            pickerEl.addEventListener('click', (e) => { if (e.target === pickerEl) pickerEl.classList.add('hidden'); });
-            pickerEl.querySelector('#prPickerClose').addEventListener('click', () => pickerEl.classList.add('hidden'));
-        }
-        pickerEl.querySelector('#prPickerTitle').textContent = `${def.name}: instrument`;
-        const list = pickerEl.querySelector('#prPickerList');
-        list.innerHTML = '';
-        def.presets.forEach(p => {
-            const item = document.createElement('button');
-            item.type = 'button';
-            item.className = 'pr-picker-item' + (ch.program === p.program ? ' active' : '');
-            item.textContent = `${p.name} (${p.program})`;
-            item.addEventListener('click', () => {
-                ch.program = p.program;
-                pickerEl.classList.add('hidden');
+            </form>`;
+        const readInstrument = mountInstrumentFields(dialog.querySelector('[data-instrument-fields]'), channel);
+        dialog.addEventListener('close', () => {
+            const patch = readInstrument();
+            if (dialog.returnValue === 'apply' && patch && getChannelInfo() === channel) {
+                const typeChanged = channel.isDrum !== patch.isDrum;
+                Object.assign(channel, patch);
+                refreshHeader();
+                if (typeChanged) resetViewport();
+                onInstrumentChange?.();
                 scheduleHotReload();
-            });
-            list.appendChild(item);
+            }
+            dialog.remove();
+            if (pickerEl === dialog) pickerEl = null;
         });
-        pickerEl.classList.remove('hidden');
-    };
+        document.body.appendChild(dialog);
+        dialog.showModal();
+    });
 
     // ------------------------------------------------------------------
     // Dur buttons
@@ -981,42 +967,12 @@ export function mountPianoRoll(rootEl, opts = {}) {
     // ------------------------------------------------------------------
 
     playBtn?.addEventListener('click', togglePlay);
-    stopBtn?.addEventListener('click', stop);
+    stopBtn?.addEventListener('click', () => stop());
     loopBtn?.addEventListener('click', () => {
         state.loopEnabled = !state.loopEnabled;
         loopBtn.classList.toggle('active', state.loopEnabled);
         const sequencer = getSequencer?.();
         if (sequencer) sequencer.loopCount = state.loopEnabled ? Infinity : 0;
-    });
-    modeBtn?.addEventListener('click', () => {
-        state.playMode = state.playMode === 'track' ? 'solo' : 'track';
-        modeBtn.textContent = state.playMode === 'track' ? 'Track' : 'Solo';
-        modeBtn.classList.toggle('active', state.playMode === 'solo');
-        if (state.playing) scheduleHotReload();
-    });
-    bpmInput?.addEventListener('change', () => {
-        const seq = getSeq();
-        if (!seq) return;
-        const bpm = Math.max(40, Math.min(200, Number(bpmInput.value) || 120));
-        bpmInput.value = String(bpm);
-        seq.tempo = bpm;
-        scheduleHotReload();
-    });
-    barsInput?.addEventListener('change', () => {
-        state.barsPerLoop = Math.max(1, Math.min(32, Number(barsInput.value) || 4));
-        barsInput.value = String(state.barsPerLoop);
-        syncPatternLength();
-        state.scrollX = 0;
-        updateScrollbar();
-        scheduleHotReload();
-    });
-    stepsInput?.addEventListener('change', () => {
-        state.stepsPerBar = Math.max(1, Math.min(16, Number(stepsInput.value) || 4));
-        stepsInput.value = String(state.stepsPerBar);
-        syncPatternLength();
-        state.scrollX = 0;
-        updateScrollbar();
-        scheduleHotReload();
     });
     clearBtn?.addEventListener('click', () => {
         const p = getPattern();
@@ -1042,84 +998,60 @@ export function mountPianoRoll(rootEl, opts = {}) {
     ro.observe(wrap);
     window.addEventListener('resize', resizeCanvas);
 
-    // подписываемся на stop извне (sequencer сам закончился)
-    const seqRef = getSequencer?.();
-    if (seqRef?.eventHandler) {
-        seqRef.eventHandler.addEvent('songEnded', 'ui', () => {
-            state.playing = false;
-            playBtn?.classList.remove('active');
-            if (playBtn) playBtn.textContent = '▶';
-        });
-    }
-
-    // ------------------------------------------------------------------
-    // Init
-    // ------------------------------------------------------------------
-	    // ------------------------------------------------------------------
-    // Keyboard: arrows / CTRL+A / DEL / CTRL+C / CTRL+V
-    // ------------------------------------------------------------------
-    const isTypingTarget = (el) => el && ['INPUT','TEXTAREA','SELECT'].includes(el.tagName);
-
-    document.addEventListener('keydown', (e) => {
-        if (isTypingTarget(document.activeElement)) return;
+    // Menu actions and keyboard shortcuts share the same note clipboard.
+    const editNotes = (action) => {
+        if (!state.visible || rootEl.inert || pickerEl?.open) return false;
         const p = getPattern();
-        if (!p) return;
-        const chn = getChannel();
-
-        // CTRL+A — выделить всё в слое
-        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
-            e.preventDefault();
-            state.selection.clear();
-            for (const n of p.notes) if (n.track === chn) state.selection.add(n);
+        if (!p) return false;
+        const message = (text) => { $('#prEditStatus').textContent = text; };
+        const selected = [...state.selection];
+        if (action === 'all') {
+            state.selection = new Set(p.notes.filter(n => n.track === getChannel()));
             dirty = true;
-            return;
-        }
-
-        // CTRL+X — cut
-        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'x' && state.selection.size) {
-            e.preventDefault();
-            window.__prClipboard = Array.from(state.selection).map(n => ({ ...n }));
-            p.notes = p.notes.filter(n => !state.selection.has(n));
-            const count = state.selection.size;
-            state.selection.clear();
-            scheduleHotReload();
-            dirty = true;
-            log(`Cut ${count} notes`);
-            return;
-        }
-
-        // CTRL+C — copy
-        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c' && state.selection.size) {
-            e.preventDefault();
-            window.__prClipboard = Array.from(state.selection).map(n => ({ ...n }));
-            log(`Copied ${state.selection.size} notes`);
-            return;
-        }
-
-        // CTRL+V — paste at EXACT positions, select the pasted notes
-        if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v' && window.__prClipboard?.length) {
-            e.preventDefault();
-            const pasted = [];
-            for (const n of window.__prClipboard) {
-                const copy = { ...n, track: chn };
-                p.notes.push(copy);
-                pasted.push(copy);
+        } else if (action === 'copy' || action === 'cut' || action === 'delete') {
+            if (!selected.length) { message('Select notes first'); return true; }
+            if (action !== 'delete') clipboard = copyNotes(selected, getTimeDiv());
+            if (action !== 'copy') {
+                p.notes = p.notes.filter(n => !state.selection.has(n));
+                state.selection.clear();
+                if (action === 'cut') state.pasteCursor = Math.min(...selected.map(n => n.tick));
+                scheduleHotReload();
             }
-            state.selection.clear();
-            for (const n of pasted) state.selection.add(n);
+            message(`${action === 'copy' ? 'Copied' : action === 'cut' ? 'Cut' : 'Deleted'} ${selected.length} note(s)`);
+        } else if (action === 'paste') {
+            if (!clipboard) { message('No copied notes'); return true; }
+            const placement = planPaste(clipboard, { step: stepTicks(), timeDivision: getTimeDiv(), length: loopTicks(),
+                cursor: state.pasteCursor, selection: selected, notes: p.notes });
+            if (!placement) { message('Not enough room. Choose an earlier position on the ruler or another pattern.'); return true; }
+            state.selection = new Set(placement.notes.map(n => getSeq().addNote(p.id, {
+                ...n, tick: placement.start + n.tick, track: getChannel(),
+            })));
+            state.pasteCursor = null;
+            const x = stepToX(placement.start / stepTicks());
+            if (x < LABEL_W || x >= wrap.clientWidth) {
+                state.scrollX = placement.start / stepTicks() * cellW() - cellW();
+                updateScrollbar();
+            }
+            const pasted = [...state.selection];
+            const pitch = pasted[Math.floor(pasted.length / 2)].key;
+            const y = rowToY(layer().pitchMax - pitch);
+            if (y < HEADER_H || y >= wrap.clientHeight) state.scrollY = (layer().pitchMax - pitch) * ROW_H - wrap.clientHeight / 2;
             scheduleHotReload();
-            dirty = true;
-            log(`Pasted ${pasted.length} notes (selected — move with arrows)`);
-            return;
+            message(`Pasted ${pasted.length} note(s)`);
         }
+        return true;
+    };
 
-        // DEL / Backspace — удалить
-        if ((e.key === 'Delete' || e.key === 'Backspace') && state.selection.size) {
-            e.preventDefault();
-            p.notes = p.notes.filter(n => !state.selection.has(n));
-            state.selection.clear();
-            scheduleHotReload();
-            dirty = true;
+    const shortcuts = { KeyA: 'all', KeyC: 'copy', KeyX: 'cut', KeyV: 'paste' };
+    document.addEventListener('keydown', (e) => {
+        const active = document.activeElement;
+        if (!state.visible || rootEl.inert || pickerEl?.open || document.querySelector('.pr-picker-overlay:not(.hidden), .arr-dialog-overlay') ||
+            active?.closest('input, textarea, select, [contenteditable="true"]')) return;
+        const action = (e.ctrlKey || e.metaKey) && !e.altKey
+            ? shortcuts[e.code] ?? shortcuts[`Key${e.key.toUpperCase()}`]
+            : (e.key === 'Delete' || e.key === 'Backspace') && 'delete';
+        if (action) {
+            if (editNotes(action)) e.preventDefault();
             return;
         }
 
@@ -1160,18 +1092,16 @@ export function mountPianoRoll(rootEl, opts = {}) {
         }
         const list = mixerEl.querySelector('#prMixerList');
         list.innerHTML = '';
-        LAYER_DEFS.forEach(def => {
-            const ch = seq.channels?.find(c => c.channel === def.channel);
-            if (!ch) return;
+        seq.channels.filter(ch => ch.created !== false).forEach(ch => {
             const row = document.createElement('div');
             row.style.cssText = 'display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border)';
 
             const dot = document.createElement('span');
-            dot.style.cssText = `width:12px;height:12px;border-radius:50%;background:${def.color};flex-shrink:0`;
+            dot.style.cssText = `width:12px;height:12px;border-radius:50%;background:${ch.color || '#4ec9b0'};flex-shrink:0`;
             row.appendChild(dot);
 
             const name = document.createElement('span');
-            name.textContent = def.name;
+            name.textContent = ch.name || `Ch ${ch.channel + 1} · ${getInstrumentLabel(ch)}`;
             name.style.cssText = 'flex:1;font-size:12px;font-weight:600';
             row.appendChild(name);
 
@@ -1210,9 +1140,7 @@ export function mountPianoRoll(rootEl, opts = {}) {
         mixerEl.classList.remove('hidden');
     };
 
-    $('#prMasterVol')?.addEventListener('input', (e) => {
-        setMasterVolume(Number(e.target.value) / 100);
-    });
+    bindMasterVolume($('#prMasterVol'));
 	
     $('#prBackBtn')?.addEventListener('click', () => {
         stop();
@@ -1220,13 +1148,9 @@ export function mountPianoRoll(rootEl, opts = {}) {
     });
 	
     resizeCanvas();
-    buildLayerBar();
+    refreshHeader();
     buildDurButtons();
-    if (bpmInput)   bpmInput.value   = String(getSeq()?.tempo || 120);
-    if (barsInput)  barsInput.value  = String(state.barsPerLoop);
-    if (stepsInput) stepsInput.value = String(state.stepsPerBar);
     loopBtn?.classList.toggle('active', state.loopEnabled);
-    syncPatternLength();
     frame();
 
     // ------------------------------------------------------------------
@@ -1235,56 +1159,14 @@ export function mountPianoRoll(rootEl, opts = {}) {
     return {
 		root: rootEl,
         openMixer: () => openMixer(),
-        setActivePattern(pid) {
-            const seq = getSeq();
-            if (!seq?.patterns?.find(p => p.id === pid)) return;
-            state.activePatternId = pid;
-            const pat = seq.patterns.find(p => p.id === pid);
-            if (pat?.channel !== undefined) {
-                const idx = LAYER_DEFS.findIndex(d => d.channel === pat.channel);
-                if (idx >= 0) state.activeLayerIdx = idx;
-            }
-            state.selection.clear();
-            state.scrollX = 0;
-            refreshLayerBar();
-            updateScrollbar();
-            dirty = true;
+        setChannel(channel) {
+            state.channel = channel;
         },
         refresh() {
-            state.selection.clear();
-            if (bpmInput) bpmInput.value = String(getSeq()?.tempo || 120);
-
-            // Автоподгонка количества баров под паттерн (для MIDI-импорта)
-            const p = getPattern();
-            if (p && p.lengthTicks > 0) {
-                const ticksPerBar = stepTicks() * state.stepsPerBar;
-                const bars = Math.ceil(p.lengthTicks / ticksPerBar);
-                state.barsPerLoop = Math.min(32, Math.max(4, bars));
-                state.scrollX = 0;
-            }
-            syncPatternLength();
-            updateScrollbar();
-            dirty = true;
+            refreshHeader();
+            resetViewport();
         },
-        getSelection: () => Array.from(state.selection),
-        deleteSelection() {
-            const p = getPattern();
-            if (!p?.notes) return;
-            p.notes = p.notes.filter(n => !state.selection.has(n));
-            state.selection.clear();
-            scheduleHotReload();
-        },
-        copySelection: () => Array.from(state.selection).map(n => ({ ...n })),
-        pasteNotes(clipboard, atTick = null) {
-            const p = getPattern();
-            if (!p || !clipboard?.length) return;
-            const minTick = Math.min(...clipboard.map(n => n.tick));
-            const offset = atTick ?? minTick;
-            clipboard.forEach(n => {
-                p.notes.push({ ...n, tick: n.tick - minTick + offset, track: getChannel() });
-            });
-            scheduleHotReload();
-        },
+        editNotes,
         play,
         stop,
         destroy() {
@@ -1299,23 +1181,6 @@ export function mountPianoRoll(rootEl, opts = {}) {
             window.removeEventListener('resize', resizeCanvas);
             pickerEl?.remove();
         },
-		setGrid({ bars, steps }) {
-            if (bars)  { state.barsPerLoop  = Math.max(1, Math.min(32, bars)); }
-            if (steps) { state.stepsPerBar  = Math.max(1, Math.min(16, steps)); }
-            syncPatternLength();
-            state.scrollX = 0;
-            updateScrollbar();
-            dirty = true;
-        },
-		setLayer(idx) {
-            if (idx < 0 || idx >= LAYER_DEFS.length) return;
-            state.activeLayerIdx = idx;
-            state.selection.clear();
-            state.scrollX = 0;
-            refreshLayerBar();
-            updateScrollbar();
-            dirty = true;
-        },
-        setVisible(v) { /* no-op, visibility handled by CSS */ },
+        setVisible(v) { state.visible = v; },
     };
 }

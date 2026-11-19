@@ -10,14 +10,14 @@ export function openProjectSettings({ initial = {}, title = 'Project Settings', 
             <div style="padding:14px 16px;display:flex;flex-direction:column;gap:12px">
                 <label class="pr-num" style="justify-content:space-between">
                     <span>Name</span>
-                    <input id="psName" type="text" style="width:180px" value="${initial.name ?? 'Untitled'}">
+                    <input id="psName" type="text" style="width:180px" >
                 </label>
                 <label class="pr-num" style="justify-content:space-between">
                     <span>BPM</span>
                     <input id="psBpm" type="number" min="40" max="200" value="${initial.bpm ?? 120}">
                 </label>
                 <label class="pr-num" style="justify-content:space-between">
-                    <span>Bars</span>
+                    <span>Bars per new pattern</span>
                     <input id="psBars" type="number" min="1" max="32" value="${initial.bars ?? 4}">
                 </label>
                 <label class="pr-num" style="justify-content:space-between">
@@ -31,6 +31,7 @@ export function openProjectSettings({ initial = {}, title = 'Project Settings', 
             </div>
         </div>
     `;
+    overlay.querySelector('#psName').value = initial.name ?? 'Untitled';
     document.body.appendChild(overlay);
 
     const close = () => overlay.remove();

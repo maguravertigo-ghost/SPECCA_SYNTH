@@ -4,6 +4,7 @@ import { log } from '../core/log.js';
 const ACTIONS = {
     'file-new':          'new',
     'file-open':         'open',
+    'file-open-project': 'openProject',
 	'file-project-settings': 'projectSettings',
     'file-save':         'save',
     'file-save-as':      'saveAs',

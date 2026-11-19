@@ -11,7 +11,10 @@ export class Sequence {
         this.version = 1;
         this.name = data.name ?? 'Untitled';
         this.tempo = data.tempo ?? 120;
+        this.tempoChanges = data.tempoChanges ?? [];
         this.timeDivision = data.timeDivision ?? DEFAULT_TPQ;
+        this.stepsPerBar = data.stepsPerBar ?? 16;
+        this.patternLengthTicks = data.patternLengthTicks ?? this.timeDivision * 4 * 4;
         this.channels = data.channels ?? [
             { channel: 0, program: 0, isDrum: false, volume: 100, pan: 64 },
             { channel: 1, program: 0, isDrum: false, volume: 100, pan: 64 },
@@ -25,14 +28,41 @@ export class Sequence {
     static create() { return new Sequence(); }
     static fromJSON(input) {
         const data = typeof input === 'string' ? JSON.parse(input) : input;
-        return new Sequence(data);
+        // Older saves omitted pattern.channel and could mix several tracks in one pattern.
+        const seq = new Sequence(data);
+        const patterns = [];
+        const extraPlacements = [];
+        for (const pattern of seq.patterns) {
+            const notes = pattern.notes || [];
+            const channel = pattern.channel ?? notes[0]?.track ?? 0;
+            const byChannel = new Map([[channel, []]]);
+            for (const note of notes) {
+                const track = note.track ?? channel;
+                if (!byChannel.has(track)) byChannel.set(track, []);
+                byChannel.get(track).push({ ...note, track });
+            }
+            for (const [track, trackNotes] of byChannel) {
+                const id = track === channel ? pattern.id : makeId('pat');
+                patterns.push({ ...pattern, id, channel: track, notes: trackNotes });
+                if (id === pattern.id) continue;
+                for (const placement of seq.arrangement.filter(p => p.patternId === pattern.id)) {
+                    extraPlacements.push({ ...placement, id: makeId('pl'), patternId: id });
+                }
+            }
+        }
+        seq.patterns = patterns;
+        seq.arrangement = [...seq.arrangement, ...extraPlacements];
+        return seq;
     }
     toJSON() {
         return JSON.stringify({
             version: this.version,
             name: this.name,
             tempo: this.tempo,
+            tempoChanges: this.tempoChanges,
             timeDivision: this.timeDivision,
+            stepsPerBar: this.stepsPerBar,
+            patternLengthTicks: this.patternLengthTicks,
             channels: this.channels,
             patterns: this.patterns,
             arrangement: this.arrangement,
@@ -47,6 +77,27 @@ export class Sequence {
         const p = { id: makeId('pat'), name, lengthTicks, channel, notes: [] };
         this.patterns.push(p);
         return p;
+    }
+
+    getChannelPattern(channel) {
+        return this.patterns.find(p => p.channel === channel) ?? null;
+    }
+
+    ensureChannelPattern(channel) {
+        return this.getChannelPattern(channel) ?? this.addPattern({
+            name: `Pattern ${this.patterns.length + 1}`,
+            channel,
+            lengthTicks: this.patternLengthTicks,
+        });
+    }
+
+    swapChannels(first, second) {
+        const swap = channel => channel === first ? second : channel === second ? first : channel;
+        for (const channel of this.channels) channel.channel = swap(channel.channel);
+        for (const pattern of this.patterns) {
+            pattern.channel = swap(pattern.channel);
+            for (const note of pattern.notes) note.track = swap(note.track);
+        }
     }
 
     removePattern(id) {
@@ -76,20 +127,52 @@ export class Sequence {
         return pl;
     }
 
+    tempoAt(tick) {
+        let tempo = this.tempo;
+        for (const change of this.tempoChanges) {
+            if (change.tick > tick) break;
+            tempo = change.tempo;
+        }
+        return tempo;
+    }
+
+    ticksToSeconds(tick) {
+        let time = 0, last = 0, tempo = this.tempo;
+        for (const change of this.tempoChanges) {
+            if (change.tick > tick) break;
+            time += (change.tick - last) * 60 / (tempo * this.timeDivision);
+            last = change.tick;
+            tempo = change.tempo;
+        }
+        return time + (tick - last) * 60 / (tempo * this.timeDivision);
+    }
+
+    secondsToTicks(seconds) {
+        let tick = 0, tempo = this.tempo;
+        for (const change of this.tempoChanges) {
+            const duration = (change.tick - tick) * 60 / (tempo * this.timeDivision);
+            if (seconds < duration) break;
+            seconds -= duration;
+            tick = change.tick;
+            tempo = change.tempo;
+        }
+        return tick + seconds * tempo * this.timeDivision / 60;
+    }
+
     // Плоский список событий в секундах. Сортирован.
     flatten() {
-        const secPerTick = 60 / (this.tempo * this.timeDivision);
         const events = [];
         for (const place of this.arrangement) {
             const p = this.getPattern(place.patternId);
             if (!p) continue;
             for (const n of p.notes) {
-                const absStart = (place.startTick + n.tick) * secPerTick;
-                const durSec   = n.dur * secPerTick;
-                const ch = this.channels[n.track];
+                const absTick = place.startTick + n.tick;
+                const absStart = this.ticksToSeconds(absTick);
+                const absEnd = this.ticksToSeconds(absTick + n.dur);
+                const ch = this.channels.find(c => c.channel === n.track);
                 if (!ch) continue;
                 events.push({ type: 'on',  time: absStart,          channel: ch.channel, key: n.key, vel: n.vel });
-                events.push({ type: 'off', time: absStart + durSec, channel: ch.channel, key: n.key });
+                events.push({ type: 'off', time: absEnd, channel: ch.channel, key: n.key });
             }
         }
         events.sort((a, b) => a.time - b.time || (a.type === 'off' ? -1 : 1));
@@ -103,6 +186,6 @@ export class Sequence {
             if (!p) continue;
             maxTick = Math.max(maxTick, place.startTick + p.lengthTicks);
         }
-        return maxTick * 60 / (this.tempo * this.timeDivision);
+        return this.ticksToSeconds(maxTick);
     }
 }

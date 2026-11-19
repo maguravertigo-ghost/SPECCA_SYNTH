@@ -1,72 +1,100 @@
-// server.js — tiny HTTP server. Writes the chosen port to port.txt.
-const http = require('http');
-const fs   = require('fs');
-const path = require('path');
+// Local SPECCA_SYNTH server. No browser profile, port file or log file is created.
+const http = require('node:http');
+const fs = require('node:fs');
+const path = require('node:path');
+const { spawn } = require('node:child_process');
+const { pipeline } = require('node:stream');
 
-const PREFERRED = parseInt(process.argv[2] || '8787', 10);
-const HOST = '127.0.0.1';
 const ROOT = __dirname;
-const PORT_FILE = path.join(ROOT, 'port.txt');
-
+const ASSETS = new Set(['index.html', 'favicon.ico', 'demo.mid', 'soundfont.sf2',
+    'main.min.js', 'spessasynth_processor.min.js']);
 const MIME = {
-  '.html':'text/html; charset=utf-8', '.htm':'text/html; charset=utf-8',
-  '.js':'text/javascript; charset=utf-8', '.mjs':'text/javascript; charset=utf-8',
-  '.css':'text/css; charset=utf-8', '.json':'application/json; charset=utf-8',
-  '.mid':'audio/midi', '.midi':'audio/midi', '.rmi':'audio/midi',
-  '.sf2':'application/octet-stream', '.sf3':'application/octet-stream',
-  '.dls':'application/octet-stream', '.wasm':'application/wasm',
-  '.png':'image/png', '.jpg':'image/jpeg', '.svg':'image/svg+xml', '.ico':'image/x-icon',
+    '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8',
+    '.js': 'text/javascript; charset=utf-8', '.mid': 'audio/midi', '.ico': 'image/x-icon',
 };
 
-try { if (fs.existsSync(PORT_FILE)) fs.unlinkSync(PORT_FILE); } catch {}
-
-const server = http.createServer((req, res) => {
-  const urlPath = decodeURIComponent((req.url || '/').split('?')[0]);
-  const rel = urlPath === '/' ? 'index.html' : urlPath.replace(/^\/+/, '');
-  const filePath = path.normalize(path.join(ROOT, rel));
-
-  if (!filePath.startsWith(ROOT + path.sep) && filePath !== ROOT) {
-    res.writeHead(403); return res.end('403');
-  }
-
-  fs.stat(filePath, (err, stat) => {
-    if (err || !stat.isFile()) { res.writeHead(404); return res.end('404 ' + rel); }
-    const ext = path.extname(filePath).toLowerCase();
-    const range = req.headers.range;
-
-    if (range && /^bytes=/.test(range)) {
-      const [s, e] = range.replace(/^bytes=/, '').split('-');
-      const start = s ? parseInt(s, 10) : 0;
-      const end   = e ? Math.min(parseInt(e, 10), stat.size - 1) : stat.size - 1;
-      if (start >= stat.size || end < start) {
-        res.writeHead(416, { 'Content-Range': `bytes */${stat.size}` }); return res.end();
-      }
-      res.writeHead(206, {
-        'Content-Type': MIME[ext] || 'application/octet-stream',
-        'Content-Length': end - start + 1,
-        'Content-Range': `bytes ${start}-${end}/${stat.size}`,
-        'Accept-Ranges': 'bytes', 'Cache-Control': 'no-cache',
-      });
-      return fs.createReadStream(filePath, { start, end }).pipe(res);
+function serve(req, res) {
+    if (req.method !== 'GET' && req.method !== 'HEAD') {
+        res.writeHead(405, { Allow: 'GET, HEAD' }).end();
+        return;
     }
-
-    res.writeHead(200, {
-      'Content-Type': MIME[ext] || 'application/octet-stream',
-      'Content-Length': stat.size,
-      'Accept-Ranges': 'bytes', 'Cache-Control': 'no-cache',
+    let relative;
+    try { relative = decodeURIComponent(req.url.split('?')[0]).replace(/^\/+/, '') || 'index.html'; }
+    catch { res.writeHead(400).end(); return; }
+    const appModule = /^(?:js\/(?:[\w-]+\/)*[\w-]+\.js|css\/[\w-]+\.css)$/.test(relative);
+    if (!appModule && !ASSETS.has(relative)) { res.writeHead(404).end(); return; }
+    const file = path.join(ROOT, relative);
+    fs.stat(file, (error, stat) => {
+        if (error || !stat.isFile()) { res.writeHead(404).end(); return; }
+        let start = 0, end = stat.size - 1;
+        let code = 200;
+        const headers = {
+            'Content-Type': MIME[path.extname(file)] || 'application/octet-stream',
+            'Cache-Control': 'no-cache', 'Accept-Ranges': 'bytes',
+        };
+        if (req.headers.range) {
+            const match = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range);
+            if (match && (match[1] || match[2])) {
+                if (match[1]) {
+                    start = Number(match[1]);
+                    if (match[2]) end = Math.min(end, Number(match[2]));
+                } else start = Math.max(0, stat.size - Number(match[2]));
+            }
+            if (!match || !(match[1] || match[2]) || start > end) {
+                res.writeHead(416, { 'Content-Range': `bytes */${stat.size}` }).end();
+                return;
+            }
+            code = 206;
+            headers['Content-Range'] = `bytes ${start}-${end}/${stat.size}`;
+        }
+        headers['Content-Length'] = end - start + 1;
+        res.writeHead(code, headers);
+        if (req.method === 'HEAD' || !stat.size) { res.end(); return; }
+        pipeline(fs.createReadStream(file, { start, end }), res, () => {});
     });
-    fs.createReadStream(filePath).pipe(res);
-  });
-});
-
-function tryListen(port, attempt = 0) {
-  server.once('error', (e) => {
-    if (e.code === 'EADDRINUSE' && attempt < 20) return tryListen(port + 1, attempt + 1);
-    console.error('[server] fatal:', e); process.exit(1);
-  });
-  server.listen(port, HOST, () => {
-    fs.writeFileSync(PORT_FILE, String(port), 'utf8');
-    console.log(`[server] http://${HOST}:${port}/`);
-  });
 }
-tryListen(PREFERRED);
+
+async function startServer({ port = 8787, host = '127.0.0.1' } = {}) {
+    if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error('Port must be an integer from 0 to 65535');
+    const server = http.createServer(serve);
+    const last = Math.min(port + 20, 65535);
+    for (let candidate = port; candidate <= last; candidate++) {
+        try {
+            return await new Promise((resolve, reject) => {
+                const onError = (error) => { server.off('listening', onReady); reject(error); };
+                const onReady = () => { server.off('error', onError); resolve(server); };
+                server.once('error', onError);
+                server.once('listening', onReady);
+                server.listen(candidate, host);
+            });
+        } catch (error) {
+            if (error.code !== 'EADDRINUSE' || candidate === last) throw error;
+        }
+    }
+}
+
+function openBrowser(url) {
+    // URL contains only the fixed loopback host and the numeric port chosen by Node.
+    const [command, ...args] = process.platform === 'win32'
+        ? ['cmd.exe', '/d', '/c', 'start', '""', url]
+        : [process.platform === 'darwin' ? 'open' : 'xdg-open', url];
+    const child = spawn(command, args, { stdio: 'ignore', windowsHide: true, windowsVerbatimArguments: process.platform === 'win32' });
+    const manual = () => console.warn(`[server] Open this address in your browser: ${url}`);
+    child.once('error', manual);
+    child.once('exit', (code) => { if (code !== 0) manual(); });
+}
+
+if (require.main === module) {
+    const args = process.argv.slice(2);
+    const open = args.includes('--open');
+    const host = open ? '127.0.0.1' : process.env.HOST || '127.0.0.1';
+    const requestedPort = Number(args.find(arg => arg !== '--open') ?? process.env.PORT ?? 8787);
+    startServer({ port: requestedPort, host }).then(server => {
+        // Keep localhost for the desktop launcher: browser projects are tied to this origin.
+        const url = `http://${host === '127.0.0.1' ? 'localhost' : host}:${server.address().port}/`;
+        console.log(`[server] ${url} (Ctrl+C to stop)`);
+        if (open) openBrowser(url);
+    }).catch(error => { console.error(`[server] ${error.message}`); process.exitCode = 1; });
+}
+
+module.exports = { startServer };

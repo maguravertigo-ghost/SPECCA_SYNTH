@@ -1,95 +1,15 @@
 @echo off
-setlocal EnableDelayedExpansion
-
-REM ============================================================
-REM  MIDI Player - start local server and open browser
-REM ============================================================
-
+setlocal
 cd /d "%~dp0"
-
-set "SERVER_JS=server.js"
-set "PORT_FILE=port.txt"
-set "LOG_FILE=server.log"
-set "HOST=http://localhost:"
-set "DEFAULT_PORT=8787"
-
-title MIDI Player
-
-echo.
-echo  ============================================
-echo   MIDI Player - SpessaSynth (dev launcher)
-echo  ============================================
-echo.
-
-if not exist "%SERVER_JS%" (
-    echo  [ERROR] %SERVER_JS% not found in:
-    echo          %CD%
-    echo.
-    pause
-    exit /b 1
-)
-
+title SPECCA_SYNTH
 where node >nul 2>nul
 if errorlevel 1 (
-    echo  [ERROR] Node.js not found in PATH.
-    echo          Install: https://nodejs.org/
-    echo.
+    echo Node.js not found. Install it from https://nodejs.org/.
     pause
     exit /b 1
 )
-
-if exist "%PORT_FILE%" del "%PORT_FILE%" >nul 2>nul
-if exist "%LOG_FILE%"  del "%LOG_FILE%"  >nul 2>nul
-
-echo  [i] Starting server...
-start "MIDI Player Server" /min cmd /c "cd /d ""%~dp0"" && node ""%SERVER_JS%"" %DEFAULT_PORT% > ""%LOG_FILE%"" 2>&1"
-
-echo  [i] Waiting for server to be ready...
-set /a WAIT_COUNT=0
-
-:WAIT_LOOP
-set /a WAIT_COUNT+=1
-if !WAIT_COUNT! GTR 40 (
-    echo.
-    echo  [ERROR] Server did not start within 20 seconds.
-    echo          See "%LOG_FILE%".
-    echo.
-    if exist "%LOG_FILE%" (
-        echo  ---- server.log ----
-        type "%LOG_FILE%"
-        echo  -------------------
-        echo.
-    )
+node server.js --open
+if errorlevel 1 (
     pause
     exit /b 1
 )
-
-timeout /t 1 /nobreak >nul 2>&1
-if not exist "%PORT_FILE%" goto :WAIT_LOOP
-set /p PORT=<"%PORT_FILE%"
-if "!PORT!"=="" goto :WAIT_LOOP
-
-set "URL=%HOST%!PORT!/"
-echo  [+] Server started on port !PORT!.
-echo.
-echo  [i] Opening !URL!
-REM --- Try to activate existing app window ---
-powershell -NoProfile -Command "$s = New-Object -ComObject WScript.Shell; if ($s.AppActivate('MIDI Player')) { exit 0 } else { exit 1 }"
-if not errorlevel 1 (
-    echo  [i] Switched to existing window.
-    exit /b 0
-)
-
-REM --- Not open yet: launch in dedicated profile ---
-set "APP_PROFILE=%~dp0supermium-profile"
-set "CHROME_EXE=C:\Program Files\Supermium\chrome.exe"
-if exist "!CHROME_EXE!" (
-    start "" "!CHROME_EXE!" --user-data-dir="!APP_PROFILE!" --no-first-run --no-default-browser-check --new-window "!URL!"
-) else (
-    start "" "!URL!"
-)
-
-echo.
-echo  [i] To stop the server: close the "MIDI Player Server" window.
-echo.
-exit /b 0

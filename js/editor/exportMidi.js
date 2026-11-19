@@ -1,200 +1,127 @@
-// js/editor/exportMidi.js
-const DEFAULT_PPQ = 480;
-
-function writeVarLen(v) {
-    const b = [v & 0x7F];
-    v >>= 7;
-    while (v > 0) { b.unshift((v & 0x7F) | 0x80); v >>= 7; }
-    return b;
+// One MIDI writer for the pattern preview and the complete arrangement.
+function writeVarLen(value) {
+    const bytes = [value & 0x7f];
+    for (value >>>= 7; value; value >>>= 7) bytes.unshift((value & 0x7f) | 0x80);
+    return bytes;
 }
 
-export function writeMIDIFromSequence(sequence, opts = {}) {
-    if (!sequence) throw new Error('writeMIDIFromSequence: no sequence');
+function gsMessage(part, parameter, value) {
+    const address = [0x40, part, parameter, value];
+    const checksum = -address.reduce((sum, byte) => sum + byte, 0) & 0x7f;
+    return [0x41, 0x10, 0x42, 0x12, ...address, checksum, 0xf7];
+}
 
-    const {
-        playMode        = 'track',
-        activeChannel   = null,
-        useAnchor       = true,
-        velocity        = 90,
-        stepsPerBar     = 4,
-        barsPerLoop     = 4,
-    } = opts;
+const gsPart = channel => channel === 9 ? 0 : channel < 9 ? channel + 1 : channel;
+const marker = text => [0xff, 0x06, text.length, ...Array.from(text, c => c.charCodeAt(0))];
 
-    const ppq       = Math.max(1, sequence.timeDivision || DEFAULT_PPQ);
-    const bpm       = Math.max(1, sequence.tempo || 120);
-    const tempoUs   = Math.max(1, Math.round(60000000 / bpm));
-    const stepTicks = Math.max(1, Math.round(ppq / 4)); // 1/16
-    const totalSteps = stepsPerBar * barsPerLoop;
-    const loopEnd   = totalSteps * stepTicks;
+function writeSequence(sequence, clips, { loop = null, respectMute = false, previewAt = null } = {}) {
+    const meta = [];
+    const ports = new Map();
+    const active = new Set();
+    let endTick = 0;
+    const emit = (tick, order, data, port = null) => {
+        let events = meta;
+        if (port !== null) {
+            if (!ports.has(port)) ports.set(port, []);
+            events = ports.get(port);
+        }
+        events.push({ tick, order, data });
+    };
 
-    const channels = sequence.channels || [];
-    const patterns = sequence.patterns || [];
-
-    const chanInfo = (ch) => channels.find(c => c.channel === ch) || channels[ch] || {};
-
-    const activeChannels = new Set();
-    if (playMode === 'solo' && activeChannel != null) {
-        activeChannels.add(activeChannel);
-    } else {
-        for (const p of patterns)
-            for (const n of (p.notes || []))
-                if (typeof n.track === 'number') activeChannels.add(n.track);
-        if (activeChannels.size === 0) {
-            // пусть будет хотя бы канал 0, чтобы якорь был всегда
-            activeChannels.add(0);
+    for (const { pattern, startTick, trim } of clips) {
+        endTick = Math.max(endTick, startTick + pattern.lengthTicks);
+        for (const note of pattern.notes) {
+            const lane = note.track;
+            if (!Number.isInteger(lane) || lane < 0 || lane >= 128 * 16) throw new Error(`Invalid MIDI lane: ${lane}`);
+            const port = Math.floor(lane / 16), ch = lane % 16;
+            const localStart = Math.max(0, Math.round(note.tick));
+            if (trim && localStart >= pattern.lengthTicks) continue;
+            const tick = startTick + localStart;
+            const end = tick + Math.max(1, Math.round(note.dur));
+            const endNote = trim ? Math.min(end, startTick + pattern.lengthTicks) : end;
+            const velocity = note.ghost ? 1 : Math.max(1, Math.min(127, note.vel ?? 90));
+            active.add(lane);
+            emit(tick, 1, [0x90 | ch, note.key & 0x7f, velocity], port);
+            emit(endNote, 0, [0x80 | ch, note.key & 0x7f, 0x40], port);
+            endTick = Math.max(endTick, endNote);
         }
     }
 
-    const events = [];
+    const sysex = (bytes, order, port) => emit(0, order, [0xf0, ...writeVarLen(bytes.length), ...bytes], port);
+    if (ports.size) sysex(gsMessage(0, 0x7f, 0), -6, Math.min(...ports.keys()));
+    for (const lane of active) {
+        const port = Math.floor(lane / 16), ch = lane % 16;
+        const info = sequence.channels.find(c => c.channel === lane) ?? {};
+        const isDrum = info.isDrum ?? (ch === 9);
+        if (isDrum !== (ch === 9)) sysex(gsMessage(0x10 | gsPart(ch), 0x15, isDrum ? 1 : 0), -5, port);
+        emit(0, -4, [0xb0 | ch, 0, (info.bankMSB ?? 0) & 0x7f], port);
+        emit(0, -3, [0xb0 | ch, 32, (info.bankLSB ?? 0) & 0x7f], port);
+        emit(0, -2, [0xc0 | ch, (info.program ?? 0) & 0x7f], port);
+        const volume = respectMute && info.muted ? 0 : (info.volume ?? 100);
+        emit(0, -1, [0xb0 | ch, 7, Math.round(volume * 127 / 100)], port);
+        emit(0, -1, [0xb0 | ch, 10, (info.pan ?? 64) & 0x7f], port);
+    }
+    if (loop) {
+        const loopEnd = loop.end ?? endTick;
+        endTick = Math.max(endTick, loopEnd);
+        emit(loop.start ?? 0, -7, marker('loopStart'));
+        emit(loopEnd, 2, marker('loopEnd'));
+    }
 
-    // Программы/драм-банк
-    for (const ch of activeChannels) {
-        const info    = chanInfo(ch);
-        const isDrum  = info.isDrum || ch === 9;
-        const program = info.program ?? 0;
-        if (isDrum) {
-            events.push({ tick: 0, type: 'cc',      ch, cc: 0,  value: 120, order: -3 });
-            events.push({ tick: 0, type: 'cc',      ch, cc: 32, value: 0,   order: -2 });
-            events.push({ tick: 0, type: 'program', ch, program,            order: -1 });
-        } else {
-            events.push({ tick: 0, type: 'program', ch, program,            order: -1 });
+    const tempoEvent = (tempo) => {
+        const micros = Math.min(0xffffff, Math.max(1, Math.round(60000000 / tempo)));
+        return [0xff, 0x51, 3, micros >> 16, (micros >> 8) & 0xff, micros & 0xff];
+    };
+    emit(0, -9, tempoEvent(previewAt === null ? sequence.tempo : sequence.tempoAt(previewAt)));
+    if (previewAt === null) for (const change of sequence.tempoChanges ?? []) {
+        if (change.tick > 0 && change.tick <= endTick) emit(change.tick, -9, tempoEvent(change.tempo));
+    }
+    const ppq = Math.max(1, sequence.timeDivision || 480);
+    const steps = sequence.stepsPerBar || 16;
+    emit(0, -8, [0xff, 0x58, 4, steps % 4 === 0 ? steps / 4 : steps, steps % 4 === 0 ? 2 : 4, 24, 8]);
+    const multiPort = [...ports.keys()].some(port => port > 0);
+    const encodeTrack = (events) => {
+        events.sort((a, b) => a.tick - b.tick || a.order - b.order);
+        const track = [];
+        let last = 0;
+        for (const event of events) {
+            track.push(...writeVarLen(event.tick - last), ...event.data);
+            last = event.tick;
         }
+        track.push(...writeVarLen(endTick - last), 0xff, 0x2f, 0);
+        return track;
+    };
+    const tracks = multiPort ? [encodeTrack(meta), ...[...ports.keys()].sort((a, b) => a - b).map(port => {
+        emit(0, -10, [0xff, 0x21, 1, port], port);
+        return encodeTrack(ports.get(port));
+    })] : [encodeTrack(meta.concat(ports.get(0) ?? []))];
+    const out = new Uint8Array(14 + tracks.reduce((length, track) => length + 8 + track.length, 0));
+    const view = new DataView(out.buffer);
+    out.set([0x4d, 0x54, 0x68, 0x64, 0, 0, 0, 6]);
+    view.setUint16(8, multiPort ? 1 : 0);
+    view.setUint16(10, tracks.length);
+    view.setUint16(12, ppq);
+    let offset = 14;
+    for (const track of tracks) {
+        out.set([0x4d, 0x54, 0x72, 0x6b], offset);
+        view.setUint32(offset + 4, track.length);
+        out.set(track, offset + 8);
+        offset += track.length + 8;
     }
-
-    // Ноты (клипаем по loopEnd)
-    for (const p of patterns) {
-        for (const n of (p.notes || [])) {
-            const ch = n.track;
-            if (!activeChannels.has(ch)) continue;
-            const start = Math.max(0, n.tick | 0);
-            if (start >= loopEnd) continue;
-            const end   = Math.min(loopEnd, start + Math.max(1, n.dur | 0));
-            const dur   = Math.max(1, end - start);
-            const vel   = n.ghost ? 1 : (n.vel ?? velocity);
-            events.push({ tick: start,       type: 'on',  ch, pitch: n.key, vel, order: 1 });
-            events.push({ tick: start + dur, type: 'off', ch, pitch: n.key,     order: 0 });
-        }
-    }
-
-    // НЕВИДИМАЯ НОТА: стартовый якорь на tick 0 (форсирует loop.start = 0)
-    //               + конечный якорь на loopEnd - stepTicks (форсирует loop.end = loopEnd)
-    if (useAnchor) {
-        const endAnchorStart = Math.max(0, loopEnd - stepTicks);
-        for (const ch of activeChannels) {
-            events.push({ tick: 0,              type: 'on',  ch, pitch: 0, vel: 1, order: -2 });
-            events.push({ tick: 1,              type: 'off', ch, pitch: 0,         order: 1 });
-            events.push({ tick: endAnchorStart, type: 'on',  ch, pitch: 0, vel: 1, order: 1 });
-            events.push({ tick: loopEnd,        type: 'off', ch, pitch: 0,         order: 0 });
-        }
-    }
-
-    events.sort((a, b) => a.tick - b.tick || a.order - b.order);
-
-    const td = [];
-    td.push(0x00, 0xFF, 0x51, 0x03,
-        (tempoUs >> 16) & 0xFF, (tempoUs >> 8) & 0xFF, tempoUs & 0xFF);
-    td.push(0x00, 0xFF, 0x58, 0x04, 0x04, 0x02, 0x18, 0x08);
-
-    let last = 0;
-    for (const ev of events) {
-        td.push(...writeVarLen(ev.tick - last));
-        if (ev.type === 'cc')          td.push(0xB0 | (ev.ch & 0x0F), ev.cc & 0x7F, ev.value & 0x7F);
-        else if (ev.type === 'program') td.push(0xC0 | (ev.ch & 0x0F), ev.program & 0x7F);
-        else if (ev.type === 'on')      td.push(0x90 | (ev.ch & 0x0F), ev.pitch & 0x7F, ev.vel & 0x7F);
-        else if (ev.type === 'off')     td.push(0x80 | (ev.ch & 0x0F), ev.pitch & 0x7F, 0x40);
-        last = ev.tick;
-    }
-    td.push(0x00, 0xFF, 0x2F, 0x00);
-
-    const header = [
-        0x4D, 0x54, 0x68, 0x64, 0, 0, 0, 6,
-        0, 0, 0, 1, (ppq >> 8) & 0xFF, ppq & 0xFF,
-    ];
-    const trackHeader = [
-        0x4D, 0x54, 0x72, 0x6B,
-        (td.length >> 24) & 0xFF, (td.length >> 16) & 0xFF,
-        (td.length >> 8) & 0xFF, td.length & 0xFF,
-    ];
-    const out = new Uint8Array(header.length + trackHeader.length + td.length);
-    out.set(header, 0);
-    out.set(trackHeader, header.length);
-    out.set(td, header.length + trackHeader.length);
     return out.buffer;
 }
 
-// js/editor/exportMidi.js — добавить в конец файла
-export function writeArrangementMIDI(sequence) {
-    if (!sequence) throw new Error('writeArrangementMIDI: no sequence');
+export function writePatternMIDI(sequence, patternId, previewAt = 0) {
+    const pattern = sequence.getPattern(patternId);
+    if (!pattern) throw new Error('No pattern ' + patternId);
+    return writeSequence(sequence, [{ pattern, startTick: 0, trim: true }], { loop: {}, respectMute: true, previewAt });
+}
 
-    const ppq       = Math.max(1, sequence.timeDivision || 480);
-    const bpm       = Math.max(1, sequence.tempo || 120);
-    const tempoUs   = Math.max(1, Math.round(60000000 / bpm));
-    const channels  = sequence.channels || [];
-    const patterns  = sequence.patterns || [];
-    const placements= sequence.arrangement || [];
-
-    const chanInfo = (ch) => channels.find(c => c.channel === ch) || {};
-
-    const events = [];
-    const activeChannels = new Set();
-
-    // Ноты: для каждого плейсмента берём ноты паттерна и сдвигаем по startTick
-    for (const pl of placements) {
-        const pat = patterns.find(p => p.id === pl.patternId);
-        if (!pat) continue;
-        for (const n of (pat.notes || [])) {
-            const ch = n.track;
-            if (typeof ch !== 'number') continue;
-            activeChannels.add(ch);
-            const start = pl.startTick + Math.max(0, n.tick | 0);
-            const dur   = Math.max(1, n.dur | 0);
-            const vel   = n.ghost ? 1 : (n.vel ?? 90);
-            events.push({ tick: start,       type: 'on',  ch, pitch: n.key, vel, order: 1 });
-            events.push({ tick: start + dur, type: 'off', ch, pitch: n.key,     order: 0 });
-        }
+export function writeArrangementMIDI(sequence, options) {
+    const clips = [];
+    for (const placement of sequence.arrangement) {
+        const pattern = sequence.getPattern(placement.patternId);
+        if (pattern) clips.push({ pattern, startTick: placement.startTick });
     }
-
-    // Программы
-    for (const ch of activeChannels) {
-        const info    = chanInfo(ch);
-        const isDrum  = info.isDrum || ch === 9;
-        const program = info.program ?? 0;
-        if (isDrum) {
-            events.push({ tick: 0, type: 'cc',      ch, cc: 0,  value: 120, order: -3 });
-            events.push({ tick: 0, type: 'cc',      ch, cc: 32, value: 0,   order: -2 });
-            events.push({ tick: 0, type: 'program', ch, program,            order: -1 });
-        } else {
-            events.push({ tick: 0, type: 'program', ch, program,            order: -1 });
-        }
-    }
-
-    events.sort((a, b) => a.tick - b.tick || a.order - b.order);
-
-    const td = [];
-    td.push(0x00, 0xFF, 0x51, 0x03,
-        (tempoUs >> 16) & 0xFF, (tempoUs >> 8) & 0xFF, tempoUs & 0xFF);
-    td.push(0x00, 0xFF, 0x58, 0x04, 0x04, 0x02, 0x18, 0x08);
-
-    let last = 0;
-    for (const ev of events) {
-        td.push(...writeVarLen(ev.tick - last));
-        if (ev.type === 'cc')           td.push(0xB0 | (ev.ch & 0x0F), ev.cc & 0x7F, ev.value & 0x7F);
-        else if (ev.type === 'program') td.push(0xC0 | (ev.ch & 0x0F), ev.program & 0x7F);
-        else if (ev.type === 'on')      td.push(0x90 | (ev.ch & 0x0F), ev.pitch & 0x7F, ev.vel & 0x7F);
-        else if (ev.type === 'off')     td.push(0x80 | (ev.ch & 0x0F), ev.pitch & 0x7F, 0x40);
-        last = ev.tick;
-    }
-    td.push(0x00, 0xFF, 0x2F, 0x00);
-
-    const header = [0x4D, 0x54, 0x68, 0x64, 0, 0, 0, 6, 0, 0, 0, 1, (ppq >> 8) & 0xFF, ppq & 0xFF];
-    const trackHeader = [
-        0x4D, 0x54, 0x72, 0x6B,
-        (td.length >> 24) & 0xFF, (td.length >> 16) & 0xFF,
-        (td.length >> 8)  & 0xFF, td.length         & 0xFF,
-    ];
-    const out = new Uint8Array(header.length + trackHeader.length + td.length);
-    out.set(header, 0);
-    out.set(trackHeader, header.length);
-    out.set(td, header.length + trackHeader.length);
-    return out.buffer;
+    return writeSequence(sequence, clips, options);
 }

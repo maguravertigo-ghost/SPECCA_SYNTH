@@ -3,54 +3,92 @@ import { WorkletSynthesizer, Sequencer } from '../../main.min.js';
 
 let ctx = null;
 let masterGain = null;
+let volume = 1;
+let analyser = null;
+let sampleFrame = null;
+const volumeControls = new Set();
 
-export function setMasterVolume(v) {
-    if (!masterGain) return;
-    const g = Math.max(0, Math.min(2, Number(v) || 0));
-    masterGain.gain.value = g;
+export function setMasterVolume(value) {
+    if (!Number.isFinite(value)) return;
+    volume = Math.max(0, Math.min(1, value));
+    if (masterGain) masterGain.gain.value = volume;
+    for (const control of volumeControls) control.value = String(Math.round(volume * 100));
 }
 
-export function applyChannelMix(seq) {
-    if (!synth || !seq?.channels) return;
-    for (const ch of seq.channels) {
-        const vol = ch.muted ? 0 : (ch.volume ?? 100);
-        try { synth.controllerChange(ch.channel, 7, Math.round(vol * 127 / 100)); } catch {}
-    }
+export function bindMasterVolume(control) {
+    if (!control) return;
+    volumeControls.add(control);
+    control.value = String(Math.round(volume * 100));
+    control.addEventListener('input', () => setMasterVolume(Number(control.value) / 100));
+}
+
+export function getOutputLevel() {
+    if (!analyser || ctx.state !== 'running') return 0;
+    analyser.getFloatTimeDomainData(sampleFrame);
+    return sampleFrame.reduce((peak, value) => Math.max(peak, Math.abs(value)), 0);
+}
+
+export const getMasterVolume = () => volume;
+
+export function applyChannelVolume(info) {
+    const midi = seq?.midiData;
+    if (!synth || !midi || !info) return;
+    const port = Math.floor(info.channel / 16), local = info.channel % 16;
+    if (!midi.tracks.some(t => t.port === port && Array.from(t.channels ?? []).includes(local))) return;
+    const offset = midi.portChannelOffsetMap[port] ?? 0;
+    const vol = info.muted ? 0 : (info.volume ?? 100);
+    synth.controllerChange(offset + local, 7, Math.round(vol * 127 / 100));
+}
+
+export function applyChannelMix(sequence) {
+    for (const channel of sequence?.channels ?? []) applyChannelVolume(channel);
 }
 let synth = null;
 let seq = null;
+let previewSeq = null;
 let readyPromise = null;
 
 export const getAudioContext = () => ctx;
 export const getSynth        = () => synth;
+export const getPreviewSequencer = () => previewSeq;
 export const getSequencer    = () => seq;
 export const getSeq          = () => seq;
 export const getSongDuration = () => seq?.duration ?? 0;
 
 export async function resumeAudio() {
-    if (!ctx) return;
-    if (ctx.state !== 'running') {
-        try { await ctx.resume(); }
-        catch (e) { console.warn('[synth] AudioContext resume failed:', e); }
+    if (!ctx) throw new Error('Audio output is not initialized');
+    if (ctx.state === 'running') return;
+    if (ctx.state === 'closed') throw new Error('Audio output is closed. Reload the page.');
+    let timeout;
+    try {
+        await Promise.race([
+            ctx.resume(),
+            new Promise((_, reject) => {
+                timeout = setTimeout(() => reject(new Error('Audio is blocked. Click the page and retry Play.')), 2000);
+            }),
+        ]);
+        if (ctx.state !== 'running') throw new Error(`Audio output is ${ctx.state}. Check your device and retry Play.`);
+    } finally {
+        clearTimeout(timeout);
     }
 }
 
-// Создаём ОДИН AudioContext (suspended до жеста) и регистрируем авто-resume.
 function ensureContext() {
     if (ctx) return ctx;
-    const savedRate = parseInt(localStorage.getItem('midi-player.sampleRate') || '44100', 10);
-    const sampleRate = [44100, 48000, 96000].includes(savedRate) ? savedRate : 44100;
+    const preferred = Number(localStorage.getItem('midi-player.sampleRate'));
+    const sampleRate = [44100, 48000, 96000].includes(preferred) ? preferred : undefined;
+    const options = { latencyHint: 'interactive', ...(sampleRate ? { sampleRate } : {}) };
     try {
-        ctx = new AudioContext({ sampleRate, latencyHint: 'interactive' });
+        ctx = new AudioContext(options);
     } catch (e) {
-        console.warn(`[synth] sampleRate ${sampleRate} unsupported, fallback`, e);
+        if (!sampleRate) throw e;
+        console.warn(`[synth] Requested sample rate ${sampleRate} unavailable; using the device rate.`, e);
         ctx = new AudioContext({ latencyHint: 'interactive' });
     }
-    ['pointerdown', 'keydown'].forEach(evt =>
-        window.addEventListener(evt, () => {
-            if (ctx.state !== 'running') ctx.resume().catch(() => {});
-        }, { capture: true })
-    );
+    // Resume inside the browser's trusted gesture, before any asynchronous MIDI loading.
+    const unlock = () => { if (ctx.state === 'suspended' || ctx.state === 'interrupted') ctx.resume().catch(() => {}); };
+    window.addEventListener('pointerdown', unlock, { capture: true });
+    window.addEventListener('keydown', unlock, { capture: true });
     return ctx;
 }
 
@@ -116,11 +154,16 @@ export async function initSynth({ onProgress } = {}) {
         await synth.soundBankManager.addSoundBank(sfBuffer, 'main-sf2', 0);
         report(0.95);
 
-        if (typeof synth.disconnect === 'function') { try { synth.disconnect(); } catch {} }
         masterGain = ctx.createGain();
+        masterGain.gain.value = volume;
+        analyser = ctx.createAnalyser();
+        analyser.fftSize = 2048;
+        sampleFrame = new Float32Array(analyser.fftSize);
         synth.connect(masterGain);
-        masterGain.connect(ctx.destination);
-        seq = new Sequencer(synth, { skipToFirstNoteOn: true });
+        masterGain.connect(analyser);
+        analyser.connect(ctx.destination);
+        seq = new Sequencer(synth, { skipToFirstNoteOn: false });
+        previewSeq = new Sequencer(synth, { skipToFirstNoteOn: false });
         report(1);
 
         if (overlay) {
@@ -130,15 +173,31 @@ export async function initSynth({ onProgress } = {}) {
         return { ctx, synth, seq };
     })();
 
-    readyPromise.catch(err => { readyPromise = null; throw err; }); // разрешаем retry
+    readyPromise.catch(() => { readyPromise = null; }); // разрешаем retry
     return readyPromise;
 }
 
-export async function loadSong(buffer, name = '') {
-    if (!seq) throw new Error('Synth not initialized');
+let loadId = 0;
+// Both transports share one synth. Loading a file changes that synth's bank and
+// channel state, so even loads targeting different sequencers must not overlap.
+let lastLoad = Promise.resolve();
+export async function loadSong(buffer, name = '', target = seq, isCurrent = () => true) {
+    if (!target) throw new Error('Synth not initialized');
+    const operation = lastLoad.catch(() => {}).then(async () => {
+        if (!isCurrent()) return false;
+        await loadSongInternal(target, buffer, name);
+        return isCurrent();
+    });
+    lastLoad = operation;
+    return operation;
+}
+
+async function loadSongInternal(seq, buffer, name) {
+    // A load never inherits a running transport from the previous file.
+    seq.pause();
 
     await new Promise((resolve, reject) => {
-        const id = 'load_' + Date.now();           // ← строковый id, не функция
+        const id = 'load_' + ++loadId;
         const cleanup = () => {
             clearTimeout(timer);
             try { seq.eventHandler.removeEvent('songChange', id); } catch {}
@@ -157,8 +216,6 @@ export async function loadSong(buffer, name = '') {
             seq.loadNewSongList([{ binary: buffer, fileName: name }]);
         } catch (e) { cleanup(); reject(e); }
     });
-
-    try { seq.currentTime = 0; } catch {}
 }
 
 export async function play() {

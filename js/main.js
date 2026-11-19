@@ -1,13 +1,13 @@
 // js/main.js
 import { log, setStatus, wireGlobalErrorHandlers } from './core/log.js';
-import { initSynth, getSynth, getAudioContext, getSequencer } from './core/synth.js';
+import { initSynth, getAudioContext, getSequencer, getOutputLevel, getMasterVolume, getSynth } from './core/synth.js';
 import { Playlist } from './playlist.js';
-import { mountPlaylistView } from './ui/playlistView.js';
 import { mountMenubar } from './ui/menubar.js';
 import { mountPlayerOverlay } from './ui/playerOverlay.js';
 import { mountPianoRoll } from './editor/pianoRoll.js';
 import { importMidi } from './editor/importMidi.js';
-import { writeMIDIFromSequence } from './editor/exportMidi.js';
+import { adaptToSoundfont } from './editor/instruments.js';
+import { writeArrangementMIDI } from './editor/exportMidi.js';
 import { Sequence } from './editor/sequence.js';
 import { openProjectSettings } from './ui/projectSettings.js';
 import { mountArranger } from './ui/arrangerView.js';
@@ -33,27 +33,15 @@ copyLogBtn?.addEventListener('click', () => {
 
 // ---------------- Playlist ----------------
 const playlist = new Playlist();
-const playlistItemsEl = document.getElementById('playlistItems');
-
-let playlistView = null;
-if (playlistItemsEl) {
-    playlistView = mountPlaylistView(playlistItemsEl, {
-        playlist,
-        getActiveId: () => playlist.getActiveId?.(),
-        onSelect: async (item) => loadTrackIntoEditor(item),
-        onRemove: (id) => {
-            playlist.removeUserTrack?.(id);
-            playlistView?.refresh?.();
-        },
-    });
-}
-
-// ---------------- Audio unlock ----------------
-
 // ---------------- Editor state ----------------
 let pianoRoll = null;
 let currentSequence = null;
 let lastLoadedName = null;
+const selectedPatterns = new Map();
+const getChannelPattern = (channel) => {
+    const selected = currentSequence?.getPattern(selectedPatterns.get(channel));
+    return selected && selected.channel === channel ? selected : currentSequence?.getChannelPattern(channel);
+};
 
 const createEmptySequence = () => {
     const seq = Sequence.create();
@@ -79,37 +67,26 @@ const createEmptySequence = () => {
             muted: false,
         });
     }
-    if (!seq.patterns || seq.patterns.length === 0) {
-        const pattern = seq.addPattern({ name: 'Pattern 1', lengthTicks: 480 * 4 * 4 });  // 4 bars × 4 beats
-        seq.placePattern(pattern.id, 0);
-    }
     return seq;
 };
 
-const ensureSequence = () => {
-    if (!currentSequence) {
-        currentSequence = createEmptySequence();
-        pianoRoll?.refresh();
-    }
-    return currentSequence;
-};
+function useSequence(sequence, name = null) {
+    currentSequence = sequence;
+    lastLoadedName = name;
+    selectedPatterns.clear();
+    pianoRoll?.setChannel(null);
+    arrangerView?.reset();
+    showArranger();
+}
 
-async function loadTrackIntoEditor(item) {
-    if (!item) return;
-    try {
-        setStatus(`Loading ${item.name}…`);
-        const buffer = await playlist.getBuffer(item);
-        lastLoadedName = item.name;
-        const seq = importMidi(buffer, item.name);
-        currentSequence = seq;
-        const totalNotes = seq.patterns.reduce((s, p) => s + (p.notes?.length || 0), 0);
-        log(`main: imported "${item.name}" — ${totalNotes} notes, ${seq.patterns.length} patterns @ ${seq.tempo} BPM`);
-        refreshAll();
-        setStatus(`Loaded: ${item.name}`);
-    } catch (err) {
-        log(`import failed: ${err}`, 'error');
-        setStatus('Load failed');
-    }
+function openMidiBuffer(buffer, name) {
+    const sequence = importMidi(buffer, name);
+    const substitutes = adaptToSoundfont(sequence, getSynth()?.soundBankManager.presetList);
+    useSequence(sequence, name);
+    const totalNotes = sequence.arrangement.reduce((count, clip) => count + (sequence.getPattern(clip.patternId)?.notes.length ?? 0), 0);
+    if (substitutes) log(`MIDI import: ${substitutes} unavailable instrument(s) replaced with SoundFont presets.`, 'warn');
+    log(`main: imported "${name}" — ${totalNotes} notes, ${sequence.patterns.length} patterns @ ${Number(sequence.tempo.toFixed(2))} BPM`);
+    setStatus(totalNotes ? `Loaded: ${name}${substitutes ? ` · ${substitutes} sound fallback(s)` : ''}` : `No editable notes: ${name}`);
 }
 
 async function bootAudio() {
@@ -128,9 +105,21 @@ async function bootAudio() {
     if (!ctx) throw new Error('AudioContext unavailable');
 
     setStatus('Ready');
+    const meters = [...document.querySelectorAll('.audio-meter')];
+    let level = 0;
+    setInterval(() => {
+        level = Math.max(getOutputLevel(), level * 0.75);
+        const description = getMasterVolume() === 0 ? 'Master volume is zero'
+            : ctx.state !== 'running' ? `Audio output is ${ctx.state}. Click Play to resume.`
+            : `Audio output · ${ctx.sampleRate / 1000} kHz`;
+        for (const meter of meters) {
+            meter.value = Math.min(1, Math.sqrt(level));
+            meter.title = description;
+        }
+    }, 80);
     if (initBar) initBar.style.display = 'none';
 	
-	ensureSequence();
+	refreshAll();
 	document.getElementById('logPanel')?.classList.add('collapsed');
 	requestAnimationFrame(() => window.dispatchEvent(new Event('resize')));
 }
@@ -150,6 +139,7 @@ function stopAllPlayback() {
 }
 
 const showArranger = () => {
+    pianoRoll?.stop();
     stopAllPlayback();
     if (arrangerRoot) arrangerRoot.style.display = 'flex';
     if (editorRoot)   editorRoot.style.display = 'none';
@@ -176,23 +166,26 @@ function refreshAll() {
 if (editorRoot) {
     pianoRoll = mountPianoRoll(editorRoot, {
         getSequence:          () => currentSequence,
-        getActivePatternId:   () => currentSequence?.patterns?.[0]?.id,
-        onNoteChange:         () => {},
-        onRequestNewSequence: () => ensureSequence(),
+        getChannelPattern,
+        onPatternSelect: (channel, id) => selectedPatterns.set(channel, id),
+        onInstrumentChange: () => arrangerView?.refresh(),
         onBackToArranger:     () => showArranger(),
     });
 }
 if (arrangerRoot) {
     arrangerView = mountArranger(arrangerRoot, {
         getSequence: () => currentSequence,
-        onOpenPattern: (pid) => {
-            pianoRoll?.setActivePattern?.(pid);
+        getChannelPattern,
+        onSelectPattern: (channel, id) => selectedPatterns.set(channel, id),
+        onOpenChannel: (channel) => {
+            currentSequence.ensureChannelPattern(channel);
+            pianoRoll?.setChannel(channel);
             showPianoRoll();
         },
     });
 }
 // Default view: arranger
-showArranger();
+useSequence(createEmptySequence());
 
 // ---------------- Local project save/load ----------------
 const STORAGE_KEY = 'spessa_projects_v1';
@@ -205,24 +198,14 @@ const writeProjects = (obj) => localStorage.setItem(STORAGE_KEY, JSON.stringify(
 const saveProjectToLocal = () => {
     const seq = currentSequence;
     if (!seq) { log('Save: nothing to save', 'warn'); return; }
-    const name = prompt('Project name:', lastLoadedName || 'My Loop');
+    const name = prompt('Project name:', lastLoadedName || seq.name);
     if (!name) return;
     const projects = readProjects();
-    projects[name] = {
-        seq: {
-            name: seq.name,
-            tempo: seq.tempo,
-            timeDivision: seq.timeDivision,
-            channels: seq.channels?.map(c => ({ ...c })),
-            patterns: seq.patterns?.map(p => ({
-                id: p.id, name: p.name, lengthTicks: p.lengthTicks,
-                notes: (p.notes || []).map(n => ({ ...n })),
-            })),
-            arrangement: seq.arrangement?.map(x => ({ ...x })) || [],
-        },
+    const entry = {
+        seq: JSON.parse(seq.toJSON()),
         timestamp: Date.now(),
     };
-    writeProjects(projects);
+    writeProjects({ ...projects, [name]: entry });
     log(`main: project saved "${name}"`);
     setStatus(`Saved: ${name}`);
 };
@@ -252,17 +235,13 @@ const openProjectDialog = () => {
         item.className = 'pr-picker-item';
         item.textContent = n;
         item.addEventListener('click', () => {
-            const seq = Sequence.create();
-            const s = projects[n].seq;
-            seq.name = s.name || n;
-            seq.tempo = s.tempo || 120;
-            seq.timeDivision = s.timeDivision || 480;
-            seq.channels = (s.channels || []).map(c => ({ ...c }));
-            seq.patterns = (s.patterns || []).map(p => ({ ...p, notes: (p.notes || []).map(x => ({ ...x })) }));
-            seq.arrangement = (s.arrangement || []).map(x => ({ ...x }));
-            currentSequence = seq;
-            refreshAll();
-            lastLoadedName = n;
+            try {
+                useSequence(Sequence.fromJSON(projects[n].seq), n);
+            } catch (err) {
+                log(`Open project failed: ${err}`, 'error');
+                setStatus('Load failed');
+                return;
+            }
             overlay.remove();
             log(`main: project loaded "${n}"`);
             setStatus(`Loaded: ${n}`);
@@ -281,42 +260,23 @@ const menubar = mountMenubar({
                 const seq = createEmptySequence();
                 seq.name = name;
                 seq.tempo = bpm;
-                seq.patterns[0].name = 'Pattern 1';
-                seq.patterns[0].lengthTicks = 480 * steps / 4 * bars
-                currentSequence = seq;
-                lastLoadedName = null;
-                refreshAll();
-                pianoRoll?.setGrid?.({ bars, steps });
+                seq.stepsPerBar = steps;
+                seq.patternLengthTicks = Math.round(seq.timeDivision / 4) * steps * bars;
+                useSequence(seq);
                 setStatus(`New project: ${name}`);
                 log(`main: new project "${name}" ${bpm}BPM ${bars}bars × ${steps}steps`);
             },
         });
     },
-    open: () => {
-        log('Menu: Open MIDI…');
-        const input = document.getElementById('fileInput');
-        if (!input) return;
-        input.onchange = async (e) => {
-            const files = Array.from(e.target.files || []);
-            if (!files.length) return;
-            for (const f of files) {
-                try { await playlist.addUserFile?.(f); }
-                catch (err) { log(`Add failed: ${err}`, 'error'); }
-            }
-            playlistView?.refresh?.();
-            const first = playlist.items?.[0];
-            if (first) await loadTrackIntoEditor(first);
-            input.value = '';
-        };
-        input.click();
-    },
+    openProject: openProjectDialog,
+    open: () => document.getElementById('openMidiInput')?.click(),
 
     save: saveProjectToLocal,
     saveAs: () => {
         log('Menu: Save As MIDI…');
         if (!currentSequence) { log('Save As: nothing to save', 'warn'); return; }
         try {
-            const midiBuf = writeMIDIFromSequence(currentSequence, { playMode: 'track', useAnchor: true });
+            const midiBuf = writeArrangementMIDI(currentSequence);
             const blob = new Blob([midiBuf], { type: 'audio/midi' });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
@@ -335,32 +295,10 @@ const menubar = mountMenubar({
 
     undo: () => log('Menu: Undo (TODO)'),
     redo: () => log('Menu: Redo (TODO)'),
-    cut:  () => {
-        const sel = pianoRoll?.getSelection?.() || [];
-        if (!sel.length) return;
-        window.__prClipboard = pianoRoll.copySelection();
-        pianoRoll.deleteSelection();
-        log(`Menu: cut ${sel.length} notes`);
-    },
-    copy: () => {
-        const sel = pianoRoll?.getSelection?.() || [];
-        if (!sel.length) return;
-        window.__prClipboard = pianoRoll.copySelection();
-        log(`Menu: copied ${sel.length} notes`);
-    },
-    paste: () => {
-        if (window.__prClipboard?.length) {
-            pianoRoll?.pasteNotes(window.__prClipboard);
-            log(`Menu: pasted ${window.__prClipboard.length} notes`);
-        }
-    },
-    del: () => {
-        const sel = pianoRoll?.getSelection?.() || [];
-        if (sel.length) {
-            pianoRoll.deleteSelection();
-            log(`Menu: deleted ${sel.length} notes`);
-        }
-    },
+    cut: () => pianoRoll?.editNotes('cut'),
+    copy: () => pianoRoll?.editNotes('copy'),
+    paste: () => pianoRoll?.editNotes('paste'),
+    del: () => pianoRoll?.editNotes('delete'),
 
     mixer: () => pianoRoll?.openMixer?.(),
     openPlayer: () => playerOverlay?.open(),
@@ -375,8 +313,7 @@ const menubar = mountMenubar({
         log('Menu: playlist saved');
     },
     clearPlaylist: () => {
-        playlist.clearUserTracks?.();
-        playlistView?.refresh?.();
+        playerOverlay?.clear();
         log('Menu: playlist cleared');
     },
 	projectSettings: () => {
@@ -385,43 +322,62 @@ const menubar = mountMenubar({
             title: 'Project Settings',
             initial: {
                 name:  seq?.name  || 'Untitled',
-                bpm:   seq?.tempo || 120,
-                bars:  Math.max(1, Math.round((seq?.patterns?.[0]?.lengthTicks || 1920) / (480 * 4))),
-                steps: 4,
+                bpm:   Math.round(seq?.tempo || 120),
+                bars: Math.max(1, Math.round(seq.patternLengthTicks / (Math.round(seq.timeDivision / 4) * seq.stepsPerBar))),
+                steps: seq.stepsPerBar,
             },
             onApply: ({ name, bpm, bars, steps }) => {
                 if (!seq) return;
                 seq.name  = name;
                 seq.tempo = bpm;
-                seq.patterns.forEach(p => p.lengthTicks = 480 * steps * bars);
+                seq.stepsPerBar = steps;
+                seq.patternLengthTicks = Math.round(seq.timeDivision / 4) * steps * bars;
                 refreshAll();
-                pianoRoll?.setGrid?.({ bars, steps });
                 setStatus(`Settings updated: ${bpm}BPM ${bars}×${steps}`);
             },
         });
     },
 });
 
+const midiInput = document.getElementById('openMidiInput');
+midiInput?.addEventListener('change', async () => {
+    const file = midiInput.files?.[0];
+    midiInput.value = '';
+    if (!file) return;
+    try { openMidiBuffer(await file.arrayBuffer(), file.name); }
+    catch (err) {
+        log(`import failed: ${err}`, 'error');
+        setStatus('Load failed');
+    }
+});
+
 // ---------------- Player overlay ----------------
 const playerOverlay = mountPlayerOverlay({
     playlist,
-    onSelectTrack: (item) => loadTrackIntoEditor(item),
-    onRequestInit: () => playlistView?.refresh?.(),
-    onLoaded: () => playlistView?.refresh?.(),
+    onOpen: () => {
+        pianoRoll?.stop();
+        arrangerView?.stop();
+        editorRoot.inert = arrangerRoot.inert = document.querySelector('.menubar').inert = true;
+    },
+    onClose: () => { editorRoot.inert = arrangerRoot.inert = document.querySelector('.menubar').inert = false; },
 });
 
 // ---------------- Init UI ----------------
-await playlist.load();          // ← подхватывает demo.mid и сохранённые треки
-playlistView?.refresh?.();
+await playlist.load();
 
-bootAudio();                    // initSynth сам покажет оверлей, дождётся 1 клика и скроется
+bootAudio().catch(err => {
+    document.getElementById('audioUnlock')?.classList.add('hidden');
+    document.getElementById('initBar')?.style.setProperty('display', 'none');
+    log(`Audio unavailable: ${err}`, 'error');
+    setStatus('Audio unavailable');
+});
 
 log('main: shell ready');
 
 // js/main.js — в самом конце
 const srSelect = document.getElementById('sampleRateSelect');
 if (srSelect) {
-    const saved = localStorage.getItem('midi-player.sampleRate') || '44100';
+    const saved = localStorage.getItem('midi-player.sampleRate') || 'auto';
     srSelect.value = saved;
     srSelect.addEventListener('change', () => {
         localStorage.setItem('midi-player.sampleRate', srSelect.value);

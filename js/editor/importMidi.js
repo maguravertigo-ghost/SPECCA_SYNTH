@@ -1,120 +1,163 @@
-// js/editor/importMidi.js
 import { BasicMIDI } from '../../main.min.js';
 import { Sequence } from './sequence.js';
 
+function buildPatterns(sequence, channel, notes, barTicks) {
+    notes.sort((a, b) => a.tick - b.tick || a.key - b.key || a.dur - b.dur || a.vel - b.vel);
+    const patterns = new Map();
+    for (let i = 0; i < notes.length;) {
+        const start = Math.floor(notes[i].tick / barTicks) * barTicks;
+        let end = start + barTicks;
+        const local = [];
+        // Keep sustained notes intact: join adjacent bars if a note crosses the boundary.
+        for (; i < notes.length && notes[i].tick < end; i++) {
+            const note = notes[i];
+            end = Math.max(end, Math.ceil((note.tick + note.dur) / barTicks) * barTicks);
+            local.push({ ...note, tick: note.tick - start, track: channel });
+        }
+        const lengthTicks = end - start;
+        const signature = JSON.stringify([lengthTicks, local.map(n => [n.tick, n.key, n.vel, n.dur])]);
+        let pattern = patterns.get(signature);
+        if (!pattern) {
+            pattern = sequence.addPattern({ name: `${channel + 1}.${patterns.size + 1}`, channel, lengthTicks });
+            for (const note of local) sequence.addNote(pattern.id, note);
+            patterns.set(signature, pattern);
+        }
+        sequence.placePattern(pattern.id, start);
+    }
+}
+
 export function importMidi(buffer, name = '') {
     const midi = BasicMIDI.fromArrayBuffer(buffer, name);
+    const seq = new Sequence({ name: name || midi.fileName || 'Imported', timeDivision: midi.timeDivision || 480 });
+    const division = seq.timeDivision;
+    // BasicMIDI lists tempo changes in reverse; the default 120 BPM precedes tick-zero events.
+    const tempos = Array.from(new Map([...midi.tempoChanges].reverse().map(t => [t.ticks, t.tempo])));
+    seq.tempo = tempos[0]?.[1] ?? 120;
+    seq.tempoChanges = tempos.filter(([tick]) => tick > 0).map(([tick, tempo]) => ({ tick, tempo }));
+    const meter = midi.tracks.flatMap(t => t.events.filter(e => e.statusByte === 0x58 && e.ticks === 0))[0];
+    if (meter) seq.stepsPerBar = Math.max(1, Math.round(meter.data[0] * 16 / (2 ** meter.data[1])));
+    const barTicks = Math.max(1, Math.round(division * seq.stepsPerBar / 4));
+    seq.patternLengthTicks = barTicks * 4;
+    seq.channels = Array.from({ length: 16 }, (_, channel) => ({
+        channel, program: 0, isDrum: channel === 9, volume: 100, pan: 64, created: false,
+    }));
 
-    const seq = Sequence.create();
-    seq.name = name || midi.fileName || 'Imported';
-    seq.timeDivision = midi.timeDivision || 480;
-
-    // Option A: только первый tempo. tempoChanges[last] — это tick 0.
-    // После BasicMIDI.parseInternal массив перевёрнут:
-	// [..., <самый ранний темп файла>, <дефолт 120>]
-	// Нужен темп файла — это второй с конца.
-	const initialTempo = midi.tempoChanges.length >= 2
-		? midi.tempoChanges[midi.tempoChanges.length - 2].tempo
-		: 120;
-    seq.tempo = Math.round(initialTempo);
-
-    // 16 каналов по умолчанию, ch 9 = drums
-    seq.channels = [];
-    for (let ch = 0; ch < 16; ch++) {
-        seq.channels.push({
-            channel: ch,
-            program: 0,
-            isDrum: ch === 9,
-            volume: 100,
-            pan: 64,
+    const ports = new Map();
+    const state = (port) => {
+        if (!ports.has(port)) ports.set(port, {
+            mode: 'gm', channels: Array.from({ length: 16 }, (_, channel) => ({
+                program: 0, isDrum: channel === 9, bankMSB: 0, bankLSB: 0, volume: 100, pan: 64,
+                pending: new Map(), groups: new Map(),
+            })),
         });
-    }
-
-    const lastTick = Math.max(midi.lastVoiceEventTick, seq.timeDivision * 4);
-    const channelPatterns = new Map();
-    const pendingNotes = new Map(); // channel -> Map(key -> [{key, vel, tick}])
-
-    const ensurePattern = (channel) => {
-        if (channelPatterns.has(channel)) return channelPatterns.get(channel);
-        const p = seq.addPattern({
-            name: channel === 9 ? 'Drums (Ch 10)' : `Ch ${channel + 1}`,
-            lengthTicks: lastTick,
-            channel,
-        });
-        channelPatterns.set(channel, p);
-        return p;
+        return ports.get(port);
     };
+    const pendingTrackPort = midi.tracks.map(track => track.port);
+    const trackSettings = midi.tracks.map(() => new Map());
+    const groups = [];
+    const finishNote = (start, tick) => start.group.notes.push({ key: start.key, vel: start.vel,
+        tick: start.tick, dur: Math.max(1, tick - start.tick) });
 
-    const noteOn = (channel, key, vel, tick) => {
-        let map = pendingNotes.get(channel);
-        if (!map) { map = new Map(); pendingNotes.set(channel, map); }
-        let list = map.get(key);
-        if (!list) { list = []; map.set(key, list); }
-        list.push({ key, vel, tick });
-    };
-
-    const noteOff = (channel, key, endTick) => {
-        const map = pendingNotes.get(channel);
-        if (!map) return;
-        const list = map.get(key);
-        if (!list || list.length === 0) return;
-        const start = list.shift();
-        const pattern = ensurePattern(channel);
-        seq.addNote(pattern.id, {
-            track: channel,
-            key: start.key,
-            vel: start.vel,
-            tick: start.tick,
-            dur: Math.max(1, endTick - start.tick),
-        });
-    };
-
-    midi.iterate((event) => {
-        const s = event.statusByte;
-        if (s < 0x80 || s >= 0xF0) return;
-        const type = s & 0xF0;
-        const channel = s & 0x0F;
-
-        if (type === 0x90) {
-            const key = event.data[0];
-            const vel = event.data[1];
-            if (vel === 0) noteOff(channel, key, event.ticks);
-            else           noteOn(channel, key, vel, event.ticks);
-        } else if (type === 0x80) {
-            noteOff(channel, event.data[0], event.ticks);
-        } else if (type === 0xC0) {
-            const ch = seq.channels[channel];
-            if (ch) ch.program = event.data[0];
-        } else if (type === 0xB0) {
-            const cc = event.data[0];
-            const val = event.data[1];
-            const ch = seq.channels[channel];
-            if (!ch) return;
-            if (cc === 7)  ch.volume = Math.round(val * 100 / 127);
-            if (cc === 10) ch.pan    = val;
+    midi.iterate((event, trackNumber) => {
+        const status = event.statusByte;
+        if (status === 0x21) pendingTrackPort[trackNumber] = event.data[0];
+        if (status < 0x80 || status > 0xf0) return;
+        const track = midi.tracks[trackNumber];
+        const sourcePort = pendingTrackPort[trackNumber];
+        const port = state(sourcePort);
+        const [a, b, c, d, e, f, g, h] = event.data;
+        if (status === 0xf0) {
+            if (a === 0x7e && c === 9 && (d === 1 || d === 3)) port.mode = d === 3 ? 'gm2' : 'gm';
+            if (a === 0x43 && c === 0x4c && d === 0 && e === 0 && f === 0x7e) port.mode = 'xg';
+            if (a === 0x43 && c === 0x4c && d === 8 && f === 7 && port.channels[e]) port.channels[e].isDrum = g > 0;
+            if (a === 0x41 && c === 0x42 && d === 0x12 && e === 0x40) {
+                if (f === 0 && g === 0x7f) port.mode = 'gs';
+                if ((f & 0xf0) === 0x10 && g === 0x15) {
+                    const part = f & 15;
+                    port.channels[part === 0 ? 9 : part <= 9 ? part - 1 : part].isDrum = h > 0;
+                }
+            }
+            return;
+        }
+        const source = status & 15;
+        const ch = port.channels[source];
+        const trackKey = `${sourcePort}:${source}`;
+        const settings = trackSettings[trackNumber];
+        if (!settings.has(trackKey)) settings.set(trackKey, {});
+        const local = settings.get(trackKey);
+        switch (status & 0xf0) {
+            case 0x90: if (b > 0) {
+                // Honor tracks that carry their own program/volume even when the file
+                // reuses a channel; note-only tracks still inherit the port's MIDI state.
+                const patch = local.patch ?? ch.patch ?? { program: ch.program, bankMSB: ch.bankMSB, bankLSB: ch.bankLSB };
+                const gm2 = port.mode === 'gm2';
+                const xg = port.mode === 'xg';
+                const isDrum = gm2 && [120, 121].includes(patch.bankMSB) ? patch.bankMSB === 120
+                    : xg && patch.bankMSB >= 126 ? true : ch.isDrum;
+                const bankMSB = (isDrum && (gm2 || xg)) || (gm2 && patch.bankMSB === 121) ? 0 : patch.bankMSB;
+                const bankLSB = isDrum && (gm2 || xg) ? 0 : patch.bankLSB;
+                const key = `${trackNumber}:${+isDrum}:${bankMSB}:${bankLSB}:${patch.program}`;
+                let group = ch.groups.get(key);
+                if (!group) {
+                    group = { source, sourcePort, sourceTrack: trackNumber + 1,
+                        program: patch.program, isDrum, bankMSB, bankLSB, name: track.name?.trim(),
+                        volume: local.volume ?? ch.volume, pan: local.pan ?? ch.pan, notes: [] };
+                    ch.groups.set(key, group);
+                    groups.push(group);
+                }
+                const pending = ch.pending.get(a) ?? [];
+                pending.push({ group, trackNumber, key: a, vel: b, tick: event.ticks });
+                ch.pending.set(a, pending);
+                break;
+            }
+            // A velocity-zero note-on is a note-off.
+            case 0x80: {
+                const queue = ch.pending.get(a);
+                const ownTrack = queue?.findIndex(n => n.trackNumber === trackNumber) ?? -1;
+                const [start] = queue?.splice(Math.max(0, ownTrack), 1) ?? [];
+                if (start) finishNote(start, event.ticks);
+                break;
+            }
+            case 0xc0:
+                ch.program = a;
+                ch.patch = { program: a, bankMSB: local.bankMSB ?? ch.bankMSB, bankLSB: local.bankLSB ?? ch.bankLSB };
+                local.patch = ch.patch;
+                break;
+            case 0xb0:
+                if (a === 0) local.bankMSB = ch.bankMSB = b;
+                if (a === 32) local.bankLSB = ch.bankLSB = b;
+                if (a === 7) {
+                    local.volume = ch.volume = Math.round(b * 100 / 127);
+                    // The editor uses one level per instrument, not the original automation.
+                    // Do not turn a fade-in that started at zero into a permanently muted lane.
+                    if (ch.volume) for (const group of ch.groups.values()) {
+                        if (!group.volume) group.volume = ch.volume;
+                    }
+                }
+                if (a === 10) local.pan = ch.pan = b;
+                break;
         }
     });
-
-    // Закрыть «висящие» ноты на lastTick
-    for (const [channel, map] of pendingNotes) {
-        for (const [, list] of map) {
-            while (list.length > 0) {
-                const start = list.shift();
-                const pattern = ensurePattern(channel);
-                seq.addNote(pattern.id, {
-                    track: channel,
-                    key: start.key,
-                    vel: start.vel,
-                    tick: start.tick,
-                    dur: Math.max(1, lastTick - start.tick),
-                });
-            }
-        }
+    for (const port of ports.values()) for (const ch of port.channels) {
+        for (const pending of ch.pending.values()) for (const note of pending) finishNote(note, midi.lastVoiceEventTick);
     }
-
-    for (const pattern of channelPatterns.values()) {
-        seq.placePattern(pattern.id, 0);
+    // Keep the first part on each of the 16 original rows, then allocate spare rows
+    // and further MIDI ports. Never merge several instruments into one editable part.
+    const occupied = new Set(groups.map(g => g.source));
+    const primary = new Set();
+    for (const group of groups) {
+        let channel = group.source;
+        if (primary.has(channel)) {
+            channel = seq.channels.find(c => !occupied.has(c.channel) && (c.channel !== 9 || group.isDrum))?.channel
+                ?? seq.channels.find(c => !occupied.has(c.channel))?.channel
+                ?? seq.channels.length;
+        } else primary.add(channel);
+        occupied.add(channel);
+        const { program, isDrum, bankMSB, bankLSB, volume, pan, source, sourcePort, sourceTrack } = group;
+        seq.channels[channel] = { channel, program, isDrum, bankMSB, bankLSB, volume, pan,
+            source, sourcePort, sourceTrack,
+            name: group.name || (isDrum ? `Drums · Ch ${channel + 1}` : `Ch ${channel + 1}`), created: true };
+        buildPatterns(seq, channel, group.notes, barTicks);
     }
-
     return seq;
 }

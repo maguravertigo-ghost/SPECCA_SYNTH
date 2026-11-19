@@ -51,11 +51,13 @@
         <label class="sample-rate">
             <span>SR</span>
             <select id="sampleRateSelect">
+                <option value="auto">Auto</option>
                 <option value="44100">44.1 kHz</option>
                 <option value="48000">48 kHz</option>
                 <option value="96000">96 kHz</option>
             </select>
         </label>
+        <meter class="audio-meter" min="0" max="1" value="0" aria-label="Audio output level" title="Audio output level"></meter>
         <span id="status" class="app-status">Initializing…</span>
     </div>
 </header>
@@ -77,7 +79,7 @@
 </section>
 
 <!-- PLAYER OVERLAY -->
-<div id="playerOverlay" class="player-overlay hidden" aria-hidden="true">
+<div id="playerOverlay" class="player-overlay hidden" aria-hidden="true" role="dialog" aria-modal="true" aria-label="MIDI preview">
     <div class="player-shell">
         <div class="player-header">
             <h2>Player</h2>
@@ -85,13 +87,20 @@
         </div>
 
         <div class="player-transport">
+            <button id="ptPrevious" class="btn" type="button" aria-label="Previous track">⏮</button>
             <button id="ptPlay"  class="btn btn-play" type="button">▶</button>
             <button id="ptPause" class="btn" type="button">Pause</button>
             <button id="ptStop"  class="btn" type="button">Stop</button>
-            <div id="ptProgress" class="progress-bar"><div id="ptProgressFill" class="progress-fill"></div></div>
+            <button id="ptNext" class="btn" type="button" aria-label="Next track">⏭</button>
+            <label class="arr-volume" title="When the original MIDI sounds wrong, try remapping voices to the loaded SoundFont">
+                <input id="ptCompatible" type="checkbox"> Compatible
+            </label>
+            <input id="ptProgress" type="range" min="0" max="0" value="0" step="0.01" aria-label="Playback position">
             <div class="player-time">
                 <span id="ptTimeNow">0:00</span> / <span id="ptTimeTotal">0:00</span>
             </div>
+            <label class="arr-volume">Volume <input id="ptVolume" type="range" min="0" max="100" value="100"></label>
+            <meter class="audio-meter" min="0" max="1" value="0" aria-label="Audio output level" title="Audio output level"></meter>
         </div>
 
         <div class="player-body">
@@ -110,8 +119,8 @@
             <main class="player-stage">
                 <div class="player-empty">
                     <div class="player-empty-icon">🎵</div>
-                    <p>Select a track from the playlist to play it.</p>
-                    <p class="muted">Click a track → load & play. Close the player to keep editing.</p>
+                    <p id="ptTrackName">No track selected</p>
+                    <p id="ptStatus" class="muted" aria-live="polite">Choose a track to preview. If voices are missing, try Compatible.</p>
                 </div>
             </main>
         </div>
@@ -131,6 +140,7 @@
     </div>
 </div>
 
+<input id="openMidiInput" type="file" hidden accept=".mid,.midi,.rmi,.xmf,.mod,.s3m,.xm,.it">
 <script type="module" src="./js/main.js"></script>
 </body>
 </html>

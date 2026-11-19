@@ -68,7 +68,7 @@ export function mountPlaylistView(rootEl, opts = {}) {
         if (!items.length) {
             const empty = document.createElement('div');
             empty.className = 'playlist-empty';
-            empty.textContent = 'No tracks. Use “+ Add” or File → Open.';
+            empty.textContent = 'No tracks. Use “+ Add” to add files for preview.';
             rootEl.appendChild(empty);
             return;
         }
