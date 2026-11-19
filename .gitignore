@@ -1,19 +1,162 @@
-# Большие бинарные файлы
+# пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ
 soundfont.sf2
 *.sf2
 *.sf3
 *.js__
 *.sf2_
 
-# Зависимости и временные файлы
+# пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅ
 node_modules/
 supermium-profile/
+project_extraction/
 port.txt
 server.log
 *.log
 
-# Корзина
+# пїЅпїЅпїЅпїЅпїЅпїЅпїЅ
 TRASHBIN/
 
 # stuff~
 supermium-profile/
+server.log
+supermium-profile/Default/Cache/Cache_Data/data_0
+supermium-profile/Default/Cache/Cache_Data/data_1
+supermium-profile/Default/Cache/Cache_Data/data_2
+supermium-profile/Default/Cache/Cache_Data/data_3
+supermium-profile/Default/DawnGraphiteCache/data_1
+supermium-profile/Default/DawnWebGPUCache/data_1
+supermium-profile/Default/Extension State/LOG
+supermium-profile/Default/Extension State/LOG.old
+supermium-profile/Default/GPUCache/data_0
+supermium-profile/Default/GPUCache/data_1
+supermium-profile/Default/History
+supermium-profile/Default/History-journal
+supermium-profile/Default/Local Storage/leveldb/LOG
+supermium-profile/Default/Local Storage/leveldb/LOG.old
+supermium-profile/Default/Session Storage/000003.log
+supermium-profile/Default/Session Storage/LOG
+supermium-profile/Default/shared_proto_db/000003.log
+supermium-profile/Default/shared_proto_db/LOG
+supermium-profile/Default/shared_proto_db/LOG.old
+supermium-profile/Default/shared_proto_db/metadata/000003.log
+supermium-profile/Default/shared_proto_db/metadata/LOG
+supermium-profile/Default/shared_proto_db/metadata/LOG.old
+supermium-profile/Default/Site Characteristics Database/000003.log
+supermium-profile/Default/Site Characteristics Database/LOG
+supermium-profile/Default/Site Characteristics Database/LOG.old
+supermium-profile/Default/Sync Data/LevelDB/LOG
+supermium-profile/Default/Sync Data/LevelDB/LOG.old
+supermium-profile/Default/Web Data
+supermium-profile/first_party_sets.db
+supermium-profile/GrShaderCache/data_1
+supermium-profile/Local State
+supermium-profile/segmentation_platform/ukm_db
+supermium-profile/ShaderCache/data_1
+supermium-profile/Variations
+server.log
+supermium-profile/Default/Cache/Cache_Data/data_0
+supermium-profile/Default/Cache/Cache_Data/data_1
+supermium-profile/Default/Cache/Cache_Data/data_2
+supermium-profile/Default/Cache/Cache_Data/data_3
+supermium-profile/Default/DawnGraphiteCache/data_1
+supermium-profile/Default/DawnWebGPUCache/data_1
+supermium-profile/Default/Extension State/LOG
+supermium-profile/Default/Extension State/LOG.old
+supermium-profile/Default/GPUCache/data_0
+supermium-profile/Default/GPUCache/data_1
+supermium-profile/Default/History
+supermium-profile/Default/History-journal
+supermium-profile/Default/Local Storage/leveldb/LOG
+supermium-profile/Default/Local Storage/leveldb/LOG.old
+supermium-profile/Default/Session Storage/000003.log
+supermium-profile/Default/Session Storage/LOG
+supermium-profile/Default/shared_proto_db/000003.log
+supermium-profile/Default/shared_proto_db/LOG
+supermium-profile/Default/shared_proto_db/LOG.old
+supermium-profile/Default/shared_proto_db/metadata/000003.log
+supermium-profile/Default/shared_proto_db/metadata/LOG
+supermium-profile/Default/shared_proto_db/metadata/LOG.old
+supermium-profile/Default/Site Characteristics Database/000003.log
+supermium-profile/Default/Site Characteristics Database/LOG
+supermium-profile/Default/Site Characteristics Database/LOG.old
+supermium-profile/Default/Sync Data/LevelDB/LOG
+supermium-profile/Default/Sync Data/LevelDB/LOG.old
+supermium-profile/Default/Web Data
+supermium-profile/first_party_sets.db
+supermium-profile/GrShaderCache/data_1
+supermium-profile/Local State
+supermium-profile/segmentation_platform/ukm_db
+supermium-profile/ShaderCache/data_1
+supermium-profile/Variations
+server.log
+supermium-profile/Default/Cache/Cache_Data/data_0
+supermium-profile/Default/Cache/Cache_Data/data_1
+supermium-profile/Default/Cache/Cache_Data/data_2
+supermium-profile/Default/Cache/Cache_Data/data_3
+supermium-profile/Default/DawnGraphiteCache/data_1
+supermium-profile/Default/DawnWebGPUCache/data_1
+supermium-profile/Default/Extension State/LOG
+supermium-profile/Default/Extension State/LOG.old
+supermium-profile/Default/GPUCache/data_0
+supermium-profile/Default/GPUCache/data_1
+supermium-profile/Default/History
+supermium-profile/Default/History-journal
+supermium-profile/Default/Local Storage/leveldb/LOG
+supermium-profile/Default/Local Storage/leveldb/LOG.old
+supermium-profile/Default/Network/Network Persistent State
+supermium-profile/Default/Session Storage/000003.log
+supermium-profile/Default/Session Storage/LOG
+supermium-profile/Default/shared_proto_db/000003.log
+supermium-profile/Default/shared_proto_db/LOG
+supermium-profile/Default/shared_proto_db/LOG.old
+supermium-profile/Default/shared_proto_db/metadata/000003.log
+supermium-profile/Default/shared_proto_db/metadata/LOG
+supermium-profile/Default/shared_proto_db/metadata/LOG.old
+supermium-profile/Default/Site Characteristics Database/000003.log
+supermium-profile/Default/Site Characteristics Database/LOG
+supermium-profile/Default/Site Characteristics Database/LOG.old
+supermium-profile/Default/Sync Data/LevelDB/LOG
+supermium-profile/Default/Sync Data/LevelDB/LOG.old
+supermium-profile/Default/Web Data
+supermium-profile/first_party_sets.db
+supermium-profile/GrShaderCache/data_1
+supermium-profile/Local State
+supermium-profile/segmentation_platform/ukm_db
+supermium-profile/ShaderCache/data_1
+supermium-profile/Variations
+server.log
+supermium-profile/Default/Cache/Cache_Data/data_0
+supermium-profile/Default/Cache/Cache_Data/data_1
+supermium-profile/Default/Cache/Cache_Data/data_2
+supermium-profile/Default/Cache/Cache_Data/data_3
+supermium-profile/Default/DawnGraphiteCache/data_1
+supermium-profile/Default/DawnWebGPUCache/data_1
+supermium-profile/Default/Extension State/LOG
+supermium-profile/Default/Extension State/LOG.old
+supermium-profile/Default/GPUCache/data_0
+supermium-profile/Default/GPUCache/data_1
+supermium-profile/Default/History
+supermium-profile/Default/History-journal
+supermium-profile/Default/Local Storage/leveldb/LOG
+supermium-profile/Default/Local Storage/leveldb/LOG.old
+supermium-profile/Default/Network/Network Persistent State
+supermium-profile/Default/Session Storage/000003.log
+supermium-profile/Default/Session Storage/LOG
+supermium-profile/Default/shared_proto_db/000003.log
+supermium-profile/Default/shared_proto_db/LOG
+supermium-profile/Default/shared_proto_db/LOG.old
+supermium-profile/Default/shared_proto_db/metadata/000003.log
+supermium-profile/Default/shared_proto_db/metadata/LOG
+supermium-profile/Default/shared_proto_db/metadata/LOG.old
+supermium-profile/Default/Site Characteristics Database/000003.log
+supermium-profile/Default/Site Characteristics Database/LOG
+supermium-profile/Default/Site Characteristics Database/LOG.old
+supermium-profile/Default/Sync Data/LevelDB/LOG
+supermium-profile/Default/Sync Data/LevelDB/LOG.old
+supermium-profile/Default/Web Data
+supermium-profile/first_party_sets.db
+supermium-profile/GrShaderCache/data_1
+supermium-profile/Local State
+supermium-profile/segmentation_platform/ukm_db
+supermium-profile/ShaderCache/data_1
+supermium-profile/Variations
