@@ -1,6 +1,6 @@
 // js/main.js
 import { log, setStatus, wireGlobalErrorHandlers } from './core/log.js';
-import { initSynth, onAudioStatus, getAudioContext, getSequencer, getOutputLevel, getMasterVolume, getSynth } from './core/synth.js';
+import { initSynth, onAudioStatus, selectLocalSoundFont, getAudioContext, getSequencer, getOutputLevel, getMasterVolume, getSynth } from './core/synth.js';
 import { Playlist } from './playlist.js';
 import { mountMenubar } from './ui/menubar.js';
 import { mountPlayerOverlay } from './ui/playerOverlay.js';
@@ -92,16 +92,29 @@ function openMidiBuffer(buffer, name) {
 function mountAudioStatus() {
     const button = document.getElementById('audioUnlock');
     const statuses = [document.getElementById('audioState'), document.getElementById('ptAudioState')];
+    const fontInput = document.getElementById('localSoundFont');
+    const fontButtons = [...document.querySelectorAll('[data-local-soundfont]')];
+    for (const choose of fontButtons) choose.addEventListener('click', () => fontInput.click());
+    fontInput.addEventListener('change', () => {
+        const file = fontInput.files?.[0];
+        fontInput.value = '';
+        if (file) selectLocalSoundFont(file);
+    });
     button.addEventListener('click', () => initSynth().catch(() => {}));
-    onAudioStatus(({ state, message }) => {
+    onAudioStatus(({ state, message, progress, canSelectFont = true }) => {
         for (const status of statuses) {
+            status.setAttribute('aria-live', progress ? 'off' : 'polite');
             status.textContent = status.title = message;
             status.dataset.state = state;
+        }
+        for (const choose of fontButtons) {
+            choose.disabled = !canSelectFont;
+            choose.hidden = state === 'ready';
         }
         button.disabled = state === 'loading';
         button.hidden = state === 'ready';
         button.textContent = state === 'error' ? 'Retry audio' : 'Enable audio';
-        if (state !== 'idle') log(`Audio: ${message}`, state === 'error' ? 'error' : 'info');
+        if (state !== 'idle' && !progress) log(`Audio: ${message}`, state === 'error' ? 'error' : 'info');
         if (state === 'ready') refreshAll();
     });
 

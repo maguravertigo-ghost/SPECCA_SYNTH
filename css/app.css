@@ -475,7 +475,7 @@ body { display: flex; flex-direction: column; }
    ========================================================= */
 .audio-enable { flex: none; }
 .audio-state { color: var(--text-mut); font-size: 12px; }
-#audioState { max-width: 20ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#audioState { max-width: 38ch; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .audio-state[data-state="error"] { color: #ff9494; }
 
 /* =========================================================

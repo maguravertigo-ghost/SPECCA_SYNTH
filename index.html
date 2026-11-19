@@ -60,6 +60,7 @@
         </label>
         <meter class="audio-meter" min="0" max="1" value="0" aria-label="Audio output level" title="Audio output level"></meter>
         <button id="audioUnlock" class="btn audio-enable" type="button">Enable audio</button>
+        <button class="btn audio-enable" data-local-soundfont type="button" title="Choose a SoundFont from your device instead of downloading it">SoundFont…</button>
         <span id="audioState" class="audio-state" role="status">Audio off · press Play</span>
         <span id="status" class="app-status"></span>
     </div>
@@ -123,6 +124,7 @@
                 <div class="player-empty">
                     <div class="player-empty-icon">🎵</div>
                     <p id="ptTrackName">No track selected</p>
+                    <button class="btn" data-local-soundfont type="button" title="Choose a SoundFont from your device instead of downloading it">SoundFont…</button>
                     <p id="ptAudioState" class="audio-state" role="status">Audio off · press Play</p>
                     <p id="ptStatus" class="muted" aria-live="polite">Choose a track to preview. If voices are missing, try Compatible.</p>
                 </div>
@@ -131,6 +133,7 @@
     </div>
 </div>
 
+<input id="localSoundFont" type="file" hidden accept=".sf2,.sf3">
 <input id="openMidiInput" type="file" hidden accept=".mid,.midi,.rmi,.xmf,.mod,.s3m,.xm,.it">
 <script type="module" src="./js/main.js"></script>
 </body>

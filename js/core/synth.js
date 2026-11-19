@@ -1,5 +1,6 @@
 // js/core/synth.js
 import { WorkletSynthesizer, Sequencer } from '../../main.min.js';
+import { createSoundFontSource } from './soundFontSource.js';
 
 let ctx = null;
 let masterGain = null;
@@ -49,6 +50,15 @@ let previewSeq = null;
 let readyPromise = null;
 let audioStatus = { state: 'idle', message: 'Audio off · press Play' };
 const statusListeners = new Set();
+const soundFont = createSoundFontSource(new URL('../../soundfont.sf2', import.meta.url));
+let installingFont = false;
+
+export function selectLocalSoundFont(file) {
+    if (synth || installingFont) return false;
+    soundFont.select(file);
+    if (!readyPromise) reportAudio('idle', `Local SoundFont selected · press Play (${file.name})`);
+    return true;
+}
 
 export function onAudioStatus(listener) {
     statusListeners.add(listener);
@@ -56,8 +66,8 @@ export function onAudioStatus(listener) {
     return () => statusListeners.delete(listener);
 }
 
-function reportAudio(state, message) {
-    audioStatus = { state, message };
+function reportAudio(state, message, progress = false) {
+    audioStatus = { state, message, progress, canSelectFont: !synth && !installingFont };
     for (const listener of statusListeners) listener(audioStatus);
 }
 
@@ -166,12 +176,16 @@ export async function initSynth() {
                 return candidate.isReady;
             }, workletFailure);
 
-            const sfBuffer = await audioStep('Downloading SoundFont', 60000, async () => {
-                const response = await fetch(new URL('../../soundfont.sf2', import.meta.url), { signal: download.signal });
-                if (!response.ok) throw new Error(`HTTP ${response.status}`);
-                return response.arrayBuffer();
-            }, workletFailure);
-            await audioStep('Installing SoundFont', 20000, () => candidate.soundBankManager.addSoundBank(sfBuffer, 'main-sf2', 0), workletFailure);
+            const sfBuffer = await Promise.race([
+                soundFont.read({ signal: download.signal, onStatus: (label, progress) => reportAudio('loading', label, progress) }),
+                workletFailure,
+            ]);
+            installingFont = true;
+            try {
+                await audioStep('Installing SoundFont', 20000, () => candidate.soundBankManager.addSoundBank(sfBuffer, 'main-sf2', 0), workletFailure);
+            } finally {
+                installingFont = false;
+            }
 
             seq = new Sequencer(candidate, { skipToFirstNoteOn: false });
             previewSeq = new Sequencer(candidate, { skipToFirstNoteOn: false });
