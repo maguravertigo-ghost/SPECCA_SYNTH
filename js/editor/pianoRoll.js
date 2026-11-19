@@ -41,6 +41,8 @@ export function mountPianoRoll(rootEl, opts = {}) {
         getChannelPattern,
         onPatternSelect,
         onInstrumentChange,
+        onEdit,
+        onMixer,
         onBackToArranger,
     } = opts;
 
@@ -50,9 +52,11 @@ export function mountPianoRoll(rootEl, opts = {}) {
                 <strong id="prChannelName"></strong>
                 <label id="prPatternField" class="pr-num" hidden><span>Pattern</span> <select id="prPatternSelect"></select></label>
                 <button id="prInstrumentBtn" class="pr-t-btn" type="button">Instrument…</button>
+                <button id="prNewPattern" class="pr-t-btn" type="button">New pattern</button>
+                <button id="prDeletePattern" class="pr-t-btn" type="button" title="Delete pattern and all its clips">Delete pattern</button>
             </div>
             <div class="pr-toolbar">
-			    <button id="prBackBtn" class="pr-t-btn" type="button" title="Back to Arranger">← Arranger</button>
+			    <button id="prBackBtn" class="pr-t-btn" type="button" title="Back to Arranger"><span class="material-icon" aria-hidden="true">arrow_back</span> Arranger</button>
                 <span class="pr-sep"></span>
                 <label class="pr-num" title="Master volume">
                     <span>Vol</span>
@@ -60,16 +64,20 @@ export function mountPianoRoll(rootEl, opts = {}) {
                 </label>
                 <span class="pr-sep"></span>
 				<span class="pr-sep"></span>
-                <button id="prHomeBtn" class="pr-t-btn" type="button" aria-label="To start" title="To start">⏮</button>
-                <button id="prPlayBtn" class="pr-t-btn" type="button" title="Play / pause" aria-label="Play / pause">▶</button>
-                <button id="prStopBtn" class="pr-t-btn" type="button" title="Stop">⏹</button>
-                <button id="prEndBtn" class="pr-t-btn" type="button" aria-label="To end" title="To end">⏭</button>
-                <button id="prLoopBtn" class="pr-t-btn active" type="button" title="Loop">LOOP</button>
+                <button id="prMixerBtn" class="pr-t-btn" type="button" title="Project mixer" aria-label="Project mixer"><span class="material-icon" aria-hidden="true">tune</span></button>
+                <button id="prHomeBtn" class="pr-t-btn" type="button" aria-label="To start" title="To start"><span class="material-icon" aria-hidden="true">skip_previous</span></button>
+                <button id="prPlayBtn" class="pr-t-btn" type="button" title="Play / pause" aria-label="Play / pause"><span class="material-icon" aria-hidden="true">play_arrow</span></button>
+                <button aria-label="Stop" id="prStopBtn" class="pr-t-btn" type="button" title="Stop"><span class="material-icon" aria-hidden="true">stop</span></button>
+                <button id="prEndBtn" class="pr-t-btn" type="button" aria-label="To end" title="To end"><span class="material-icon" aria-hidden="true">skip_next</span></button>
+                <button aria-label="Loop" id="prLoopBtn" class="pr-t-btn active" type="button" title="Loop"><span class="material-icon" aria-hidden="true">repeat</span></button>
                 <span class="pr-sep"></span>
+                <label class="pr-num" title="Alt temporarily bypasses snap"><span>Snap</span>
+                    <select id="prSnap"><option value="grid">Grid</option><option value="third">⅓ step</option><option value="free">Free</option></select>
+                </label>
                 <span class="pr-dur-label">Dur:</span>
                 <div class="pr-dur-group" id="prDurGroup"></div>
                 <span class="pr-sep"></span>
-                <button id="prClearBtn" class="btn btn-ghost" type="button" title="Clear current pattern">🗑 Clear</button>
+                <button id="prClearBtn" class="btn btn-ghost" type="button" title="Clear current pattern"><span class="material-icon" aria-hidden="true">delete</span> Clear</button>
             </div>
             <div class="pr-canvas-wrap"><canvas id="prCanvas" tabindex="0" aria-label="Piano roll. Click its ruler to position playback or paste."></canvas></div>
             <div id="prEditStatus" class="pr-edit-status" role="status">Ctrl/Cmd+C, X, V · Click the ruler to position playback or paste</div>
@@ -127,6 +135,14 @@ export function mountPianoRoll(rootEl, opts = {}) {
     const getChannelInfo = () => getSeq()?.channels.find(c => c.channel === getChannel());
     const getPattern = () => getChannelPattern?.(getChannel()) ?? null;
     const getTimeDiv = () => getSeq()?.timeDivision || 480;
+    const snapQuantum = (altKey = false) => {
+        const mode = altKey ? 'free' : $('#prSnap').value;
+        return mode === 'grid' ? stepTicks() : mode === 'third' ? stepTicks() / 3 : 1;
+    };
+    const snapDelta = (delta, altKey) => {
+        const quantum = snapQuantum(altKey);
+        return Math.round(Math.round(delta / quantum) * quantum);
+    };
     const stepTicks = () => Math.max(1, Math.round(getTimeDiv() / 4));
     const stepsPerBar = () => getSeq()?.stepsPerBar || 16;
     const loopTicks = () => Math.max(1, getPattern()?.lengthTicks ?? getTimeDiv() * 4);
@@ -242,8 +258,8 @@ export function mountPianoRoll(rootEl, opts = {}) {
                 const barIdx = Math.floor(s / spb);
                 const x = stepToX(s);
                 if (x + cw < LABEL_W || x > w) continue;
-                const shadeBase = isBlack ? 9 : 14;
-                const boost = (barIdx % 2 === 0) ? 0 : 8;
+                const shadeBase = isBlack ? 10 : 16;
+                const boost = (barIdx % 2 ? 11 : 0) + (Math.floor(s / 4) % 2 ? 5 : 0);
                 const v = shadeBase + boost;
                 ctx.fillStyle = `hsl(240, 5%, ${v}%)`;
                 ctx.fillRect(x, y, cw, ROW_H);
@@ -255,7 +271,7 @@ export function mountPianoRoll(rootEl, opts = {}) {
         for (let s = firstStep; s <= lastStep; s++) {
             const x = Math.round(stepToX(s)) + 0.5;
             if (x < LABEL_W || x > w) continue;
-            ctx.strokeStyle = (s % spb === 0) ? 'rgba(180,180,200,0.45)' : 'rgba(0,0,0,0.9)';
+            ctx.strokeStyle = s % spb === 0 ? '#7b7b8e' : s % 4 === 0 ? '#494954' : '#202025';
             ctx.lineWidth   = (s % spb === 0) ? 1.5 : 1;
             ctx.beginPath();
             ctx.moveTo(x, HEADER_H);
@@ -285,13 +301,13 @@ export function mountPianoRoll(rootEl, opts = {}) {
                 if (row < 0) continue;
                 const x = stepToX(n.tick / stepTicks());
                 const y = rowToY(row);
-                const noteDurSteps = Math.max(1, Math.round(n.dur / stepTicks()));
+                const noteDurSteps = n.dur / stepTicks();
                 const nw = noteDurSteps * cw;
                 if (y + ROW_H < HEADER_H || y > h) continue;
                 if (x + nw < LABEL_W || x > w) continue;
                 const selected = state.selection.has(n);
                 ctx.fillStyle = selected ? '#e35b5b' : layerColor;   // красный
-                ctx.fillRect(x + 1, y + 1, nw - 2, ROW_H - 2);
+                ctx.fillRect(x + 1, y + 1, Math.max(1, nw - 2), ROW_H - 2);
                 ctx.strokeStyle = selected ? '#fff' : 'rgba(0,0,0,0.55)';
                 ctx.lineWidth = 1;
                 ctx.strokeRect(x + 0.5, y + 0.5, nw - 1, ROW_H - 1);
@@ -423,7 +439,7 @@ export function mountPianoRoll(rootEl, opts = {}) {
             state.cursorTick = loopTicks();
             state.playing = false;
             playBtn.classList.remove('active');
-            playBtn.textContent = '▶';
+            playBtn.firstElementChild.textContent = 'play_arrow';
             dirty = true;
         }
         if (state.playing && !state.loading && !seq?.paused && state.secondsPerTick && performance.now() >= seekingUntil) {
@@ -446,8 +462,8 @@ export function mountPianoRoll(rootEl, opts = {}) {
         const chn = getChannel();
         for (const n of p.notes) {
             if (n.track !== chn || n.key !== key) continue;
-            const startStep = Math.round(n.tick / stepTicks());
-            const endStep   = startStep + Math.max(1, Math.round(n.dur / stepTicks()));
+            const startStep = n.tick / stepTicks();
+            const endStep   = startStep + n.dur / stepTicks();
             if (step >= startStep && step < endStep) return { note: n, startStep, endStep };
         }
         return null;
@@ -511,9 +527,9 @@ export function mountPianoRoll(rootEl, opts = {}) {
             if (request !== playbackRequest) return;
             const sequencer = getSequencer();
             const startTick = seq.arrangement.find(p => p.patternId === pattern.id)?.startTick ?? 0;
-            const midi = writePatternMIDI(seq, pattern.id, startTick);
+            const midi = writePatternMIDI(seq, pattern.id, startTick, { liveMix: true });
             if (!await loadSong(midi, pattern.name, sequencer, () => request === playbackRequest && state.visible && !rootEl.inert)) return;
-            // Program, volume and pan are already encoded in the pattern MIDI.
+            applyChannelMix(seq);
             sequencer.loopCount = state.loopEnabled ? Infinity : 0;
             state.secondsPerTick = 60 / (seq.tempoAt(startTick) * seq.timeDivision);
 
@@ -524,7 +540,7 @@ export function mountPianoRoll(rootEl, opts = {}) {
                 sequencer.play();
                 state.playing = true;
                 playBtn.classList.add('active');
-                playBtn.textContent = '❚❚';
+                playBtn.firstElementChild.textContent = 'pause';
             }
         } catch (err) {
             if (request === playbackRequest) { $('#prEditStatus').textContent = err.message; log(`Pattern play: ${err}`, 'error'); }
@@ -546,7 +562,7 @@ export function mountPianoRoll(rootEl, opts = {}) {
         }
         state.playing = false;
         playBtn.classList.remove('active');
-        playBtn.textContent = '▶';
+        playBtn.firstElementChild.textContent = 'play_arrow';
         dirty = true;
     };
 
@@ -590,12 +606,12 @@ export function mountPianoRoll(rootEl, opts = {}) {
         const key = ps[row];
         const step = xToStep(mx);
         if (step < 0 || step >= totalSteps()) return null;
-        const found = findNoteAt(step, key);
+        const found = findNoteAt((mx - LABEL_W + state.scrollX) / cellW(), key);
         if (!found) return { key, step, note: null, row };
 
         // resize hit: правый край
         const endX = stepToX(found.endStep);
-        const rightEdge = endX - 4;
+        const rightEdge = endX - Math.min(4, (found.endStep - found.startStep) * cellW() / 3);
         const mode = mx >= rightEdge ? 'resize' : 'move';
         return { key, step, note: found.note, startStep: found.startStep, endStep: found.endStep, row, mode };
     };
@@ -736,7 +752,7 @@ export function mountPianoRoll(rootEl, opts = {}) {
         if (d.mode === 'move' && d.orig) {
             const stepT = stepTicks();
             const L = layer();
-            const dxSteps = Math.round((mx - d.startX) / cellW());
+            const deltaTick = snapDelta((mx - d.startX) / cellW() * stepT, e.altKey);
             const dyPitch = -Math.round((my - d.startY) / ROW_H);
 
             let minTick = Infinity, maxEndTick = -Infinity, minKey = Infinity, maxKey = -Infinity;
@@ -746,14 +762,11 @@ export function mountPianoRoll(rootEl, opts = {}) {
                 minKey     = Math.min(minKey, o.key);
                 maxKey     = Math.max(maxKey, o.key);
             }
-            const ts = totalSteps();
-            const minStep = Math.floor(minTick / stepT);
-            const maxStep = Math.floor(maxEndTick / stepT);
-            const dxClamp = Math.max(-minStep, Math.min(ts - maxStep, dxSteps));
+            const dxClamp = Math.max(-minTick, Math.min(loopTicks() - maxEndTick, deltaTick));
             const dyClamp = Math.max(L.pitchMin - minKey, Math.min(L.pitchMax - maxKey, dyPitch));
 
             for (const o of d.orig) {
-                o.note.tick = o.tick + dxClamp * stepT;
+                o.note.tick = o.tick + dxClamp;
                 o.note.key  = o.key  + dyClamp;
             }
             d.moved = true;
@@ -763,10 +776,8 @@ export function mountPianoRoll(rootEl, opts = {}) {
 
         // Resize
         if (d.mode === 'resize') {
-            const step = xToStep(mx);
-            const startStep = Math.round(d.note.tick / stepTicks());
-            const newDurSteps = Math.max(1, Math.min(totalSteps() - startStep, step - startStep + 1));
-            d.note.dur = newDurSteps * stepTicks();
+            const delta = snapDelta((mx - d.startX) / cellW() * stepTicks(), e.altKey);
+            d.note.dur = Math.max(1, Math.min(loopTicks() - d.note.tick, d.origDur + delta));
             d.moved = true;
             dirty = true;
             return;
@@ -805,6 +816,7 @@ export function mountPianoRoll(rootEl, opts = {}) {
     const onPointerUp = () => {
         if (state.rect) { finishRect(); return; }
         if (state.drag?.moved) scheduleHotReload();
+        if (state.drag) onEdit?.();
         state.drag = null;
     };
 
@@ -882,7 +894,9 @@ export function mountPianoRoll(rootEl, opts = {}) {
         instrumentBtn.title = channel ? instrumentFamily(channel) : '';
         instrumentBtn.disabled = !channel;
         const patterns = getSeq()?.patterns.filter(p => p.channel === state.channel) ?? [];
-        $('#prPatternField').hidden = patterns.length < 2;
+        $('#prPatternField').hidden = !patterns.length;
+        $('#prNewPattern').disabled = !channel;
+        $('#prDeletePattern').disabled = !pattern;
         patternSelect.replaceChildren(...patterns.map(p => new Option(p.name, p.id)));
         if (pattern) patternSelect.value = pattern.id;
     };
@@ -900,6 +914,22 @@ export function mountPianoRoll(rootEl, opts = {}) {
         updateScrollbar();
         dirty = true;
     };
+    $('#prNewPattern').addEventListener('click', () => {
+        const seq = getSeq();
+        if (!seq || !getChannelInfo()) return;
+        stop();
+        const pattern = seq.createChannelPattern(state.channel);
+        onPatternSelect?.(state.channel, pattern.id);
+        refreshHeader(); resetViewport(); onEdit?.();
+    });
+    $('#prDeletePattern').addEventListener('click', () => {
+        const seq = getSeq(), pattern = getPattern();
+        if (!pattern || !confirm(`Delete ${pattern.name} and all its clips?`)) return;
+        stop();
+        seq.removePattern(pattern.id);
+        onPatternSelect?.(state.channel, seq.getChannelPattern(state.channel)?.id);
+        refreshHeader(); resetViewport(); onEdit?.();
+    });
     patternSelect.addEventListener('change', () => {
         stop();
         onPatternSelect?.(state.channel, patternSelect.value);
@@ -933,6 +963,7 @@ export function mountPianoRoll(rootEl, opts = {}) {
                 refreshHeader();
                 if (typeChanged) resetViewport();
                 onInstrumentChange?.();
+                onEdit?.();
                 scheduleHotReload();
             }
             dialog.remove();
@@ -966,6 +997,7 @@ export function mountPianoRoll(rootEl, opts = {}) {
     // ------------------------------------------------------------------
 
     playBtn?.addEventListener('click', togglePlay);
+    $('#prMixerBtn').addEventListener('click', () => onMixer?.());
     stopBtn?.addEventListener('click', () => stop());
     loopBtn?.addEventListener('click', () => {
         state.loopEnabled = !state.loopEnabled;
@@ -980,6 +1012,7 @@ export function mountPianoRoll(rootEl, opts = {}) {
         p.notes = p.notes.filter(n => n.track !== chn);
         state.selection.clear();
         scheduleHotReload();
+        onEdit?.();
     });
     scrollInput?.addEventListener('input', () => {
         const max = maxScrollX();
@@ -1015,6 +1048,7 @@ export function mountPianoRoll(rootEl, opts = {}) {
                 state.selection.clear();
                 if (action === 'cut') state.pasteCursor = Math.min(...selected.map(n => n.tick));
                 scheduleHotReload();
+                onEdit?.();
             }
             message(`${action === 'copy' ? 'Copied' : action === 'cut' ? 'Cut' : 'Deleted'} ${selected.length} note(s)`);
         } else if (action === 'paste') {
@@ -1036,6 +1070,7 @@ export function mountPianoRoll(rootEl, opts = {}) {
             const y = rowToY(layer().pitchMax - pitch);
             if (y < HEADER_H || y >= wrap.clientHeight) state.scrollY = (layer().pitchMax - pitch) * ROW_H - wrap.clientHeight / 2;
             scheduleHotReload();
+            onEdit?.();
             message(`Pasted ${pasted.length} note(s)`);
         }
         return true;
@@ -1044,7 +1079,7 @@ export function mountPianoRoll(rootEl, opts = {}) {
     const shortcuts = { KeyA: 'all', KeyC: 'copy', KeyX: 'cut', KeyV: 'paste' };
     document.addEventListener('keydown', (e) => {
         const active = document.activeElement;
-        if (!state.visible || rootEl.inert || pickerEl?.open || document.querySelector('.pr-picker-overlay:not(.hidden), .arr-dialog-overlay') ||
+        if (!state.visible || rootEl.inert || pickerEl?.open || document.querySelector('dialog[open], .pr-picker-overlay:not(.hidden), .arr-dialog-overlay') ||
             active?.closest('input, textarea, select, [contenteditable="true"]')) return;
         const action = (e.ctrlKey || e.metaKey) && !e.altKey
             ? shortcuts[e.code] ?? shortcuts[`Key${e.key.toUpperCase()}`]
@@ -1063,82 +1098,16 @@ export function mountPianoRoll(rootEl, opts = {}) {
         const L = layer();
         for (const n of state.selection) {
             n.key  = Math.max(L.pitchMin, Math.min(L.pitchMax, n.key + dKey));
-            n.tick = Math.max(0, Math.min(loopTicks() - n.dur, n.tick + dStep * stepTicks()));
+            n.tick = Math.max(0, Math.min(loopTicks() - n.dur, n.tick + Math.round(dStep * snapQuantum(e.altKey))));
         }
         scheduleHotReload();
+        onEdit?.();
         dirty = true;
     });
 	
 	    // ------------------------------------------------------------------
-    // Mixer overlay (channel mute + volume) + master volume
+    // Master volume
     // ------------------------------------------------------------------
-    let mixerEl = null;
-    const openMixer = () => {
-        const seq = getSeq();
-        if (!seq) return;
-        if (!mixerEl) {
-            mixerEl = document.createElement('div');
-            mixerEl.className = 'pr-picker-overlay hidden';
-            mixerEl.innerHTML = `
-                <div class="pr-picker-box" style="width:min(480px,100%)">
-                    <div class="pr-picker-title">Mixer</div>
-                    <div class="pr-picker-list" id="prMixerList" style="padding:8px 12px"></div>
-                    <button class="btn btn-primary pr-picker-close" id="prMixerClose" type="button">Close</button>
-                </div>`;
-            document.body.appendChild(mixerEl);
-            mixerEl.addEventListener('click', e => { if (e.target === mixerEl) mixerEl.classList.add('hidden'); });
-            mixerEl.querySelector('#prMixerClose').addEventListener('click', () => mixerEl.classList.add('hidden'));
-        }
-        const list = mixerEl.querySelector('#prMixerList');
-        list.innerHTML = '';
-        seq.channels.filter(ch => ch.created !== false).forEach(ch => {
-            const row = document.createElement('div');
-            row.style.cssText = 'display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border)';
-
-            const dot = document.createElement('span');
-            dot.style.cssText = `width:12px;height:12px;border-radius:50%;background:${ch.color || '#4ec9b0'};flex-shrink:0`;
-            row.appendChild(dot);
-
-            const name = document.createElement('span');
-            name.textContent = ch.name || `Ch ${ch.channel + 1} · ${getInstrumentLabel(ch)}`;
-            name.style.cssText = 'flex:1;font-size:12px;font-weight:600';
-            row.appendChild(name);
-
-            const mute = document.createElement('button');
-            mute.type = 'button';
-            mute.textContent = ch.muted ? '◯' : '●';
-            mute.title = 'Mute';
-            mute.style.cssText = `background:${ch.muted?'transparent':'#1a7f37'};color:${ch.muted?'#666':'#fff'};border:1px solid ${ch.muted?'#666':'#1a7f37'};width:24px;height:24px;border-radius:50%;cursor:pointer;font-size:12px;line-height:1;padding:0`;
-            mute.addEventListener('click', () => {
-                ch.muted = !ch.muted;
-                mute.textContent = ch.muted ? '◯' : '●';
-                mute.style.cssText = `background:${ch.muted?'transparent':'#1a7f37'};color:${ch.muted?'#666':'#fff'};border:1px solid ${ch.muted?'#666':'#1a7f37'};width:24px;height:24px;border-radius:50%;cursor:pointer;font-size:12px;line-height:1;padding:0`;
-                applyChannelMix(getSeq());
-            });
-            row.appendChild(mute);
-
-            const slider = document.createElement('input');
-            slider.type = 'range';
-            slider.min = 0; slider.max = 100;
-            slider.value = String(ch.volume ?? 100);
-            slider.style.cssText = 'width:120px';
-            row.appendChild(slider);
-
-            const val = document.createElement('span');
-            val.textContent = String(ch.volume ?? 100);
-            val.style.cssText = 'font-family:var(--mono);font-size:11px;color:var(--text-mut);width:30px;text-align:right';
-            row.appendChild(val);
-
-            slider.addEventListener('input', () => {
-                ch.volume = Number(slider.value);
-                val.textContent = String(ch.volume);
-                applyChannelMix(getSeq());
-            });
-            list.appendChild(row);
-        });
-        mixerEl.classList.remove('hidden');
-    };
-
     bindMasterVolume($('#prMasterVol'));
 	
     $('#prBackBtn')?.addEventListener('click', () => {
@@ -1157,7 +1126,7 @@ export function mountPianoRoll(rootEl, opts = {}) {
     // ------------------------------------------------------------------
     return {
 		root: rootEl,
-        openMixer: () => openMixer(),
+        getChannel: () => state.channel,
         setChannel(channel) {
             state.channel = channel;
         },

@@ -31,18 +31,48 @@ export function getOutputLevel() {
 
 export const getMasterVolume = () => volume;
 
+const mixedChannels = new Set();
+
+export function getMidiMixChannels(target) {
+    const midi = target?.midiData;
+    if (!midi) return [];
+    const channels = new Map();
+    for (const track of midi.tracks) for (const channel of track.channels ?? []) {
+        const port = track.port ?? 0;
+        const lane = port * 16 + channel;
+        const index = (midi.portChannelOffsetMap[port] ?? 0) + channel;
+        channels.set(lane, { lane, index, channel, name: `Port ${port + 1} · Ch ${channel + 1}`, volume: 100 });
+    }
+    return [...channels.values()].sort((a, b) => a.lane - b.lane);
+}
+
+export function applyLiveMix(index, info) {
+    const channel = synth?.midiChannels[index];
+    if (!channel) return;
+    mixedChannels.add(index);
+    channel.setSystemParameter('gain', (info.volume ?? 100) / 100);
+    channel.setSystemParameter('isMuted', !!info.muted);
+}
+
+function resetLiveMix() {
+    for (const index of mixedChannels) {
+        const channel = synth?.midiChannels[index];
+        channel?.setSystemParameter('gain', 1);
+        channel?.setSystemParameter('isMuted', false);
+    }
+    mixedChannels.clear();
+}
+
 export function applyChannelVolume(info) {
-    const midi = seq?.midiData;
-    if (!synth || !midi || !info) return;
-    const port = Math.floor(info.channel / 16), local = info.channel % 16;
-    if (!midi.tracks.some(t => t.port === port && Array.from(t.channels ?? []).includes(local))) return;
-    const offset = midi.portChannelOffsetMap[port] ?? 0;
-    const vol = info.muted ? 0 : (info.volume ?? 100);
-    synth.controllerChange(offset + local, 7, Math.round(vol * 127 / 100));
+    const slot = getMidiMixChannels(seq).find(channel => channel.lane === info.channel);
+    if (slot) applyLiveMix(slot.index, info);
 }
 
 export function applyChannelMix(sequence) {
-    for (const channel of sequence?.channels ?? []) applyChannelVolume(channel);
+    const channels = new Map(sequence.channels.map(c => [c.channel, c]));
+    for (const { lane, index } of getMidiMixChannels(seq)) {
+        if (channels.has(lane)) applyLiveMix(index, channels.get(lane));
+    }
 }
 let synth = null;
 let seq = null;
@@ -223,6 +253,7 @@ export async function loadSong(buffer, name = '', target = seq, isCurrent = () =
 }
 
 async function loadSongInternal(seq, buffer, name) {
+    resetLiveMix();
     // A load never inherits a running transport from the previous file.
     seq.pause();
 

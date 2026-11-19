@@ -7,10 +7,10 @@ const { pipeline } = require('node:stream');
 
 const ROOT = __dirname;
 const ASSETS = new Set(['index.html', 'favicon.ico', 'demo.mid', 'soundfont.sf2',
-    'main.min.js', 'spessasynth_processor.min.js']);
+    'main.min.js', 'spessasynth_processor.min.js', 'icons/MaterialIcons-Regular.woff2']);
 const MIME = {
     '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8',
-    '.js': 'text/javascript; charset=utf-8', '.mid': 'audio/midi', '.ico': 'image/x-icon',
+    '.js': 'text/javascript; charset=utf-8', '.mid': 'audio/midi', '.ico': 'image/x-icon', '.woff2': 'font/woff2',
 };
 
 function serve(req, res) {

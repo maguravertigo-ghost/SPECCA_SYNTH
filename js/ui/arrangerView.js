@@ -1,6 +1,6 @@
 // js/ui/arrangerView.js
 import { log, setStatus } from '../core/log.js';
-import { getSequencer, applyChannelVolume, initSynth, bindMasterVolume, loadSong } from '../core/synth.js';
+import { getSequencer, applyChannelVolume, applyChannelMix, initSynth, bindMasterVolume, loadSong } from '../core/synth.js';
 import { writeArrangementMIDI } from '../editor/exportMidi.js';
 import { getInstrumentCatalog, mountInstrumentFields } from './instrumentFields.js';
 import { instrumentLabel } from '../editor/instruments.js';
@@ -9,7 +9,6 @@ const CHAN_W     = 160;
 const RULER_H    = 24;
 const LOOP_H     = 16;
 const MIN_BAR_W  = 80;
-const MIN_CHANNEL_ROWS = 16;
 
 const COLORS = [
     '#4ec9b0','#dcdcaa','#c586c0','#ce9178','#569cd6','#888888',
@@ -20,22 +19,23 @@ const escapeHtml = (text) => String(text).replace(/[&<>"']/g, (ch) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
 }[ch]));
 
-export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelectPattern, onOpenChannel } = {}) {
+export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelectPattern, onOpenChannel, onEdit, onMixer } = {}) {
     if (!rootEl) return null;
 
     rootEl.innerHTML = `
         <div class="arr-shell">
             <div class="arr-toolbar" aria-label="Arrangement playback">
+                <button id="arrMixer" class="arr-control" type="button" title="Project mixer" aria-label="Project mixer"><span class="material-icon" aria-hidden="true">tune</span></button>
                 <div class="arr-transport-group" role="group" aria-label="Transport">
-                    <button id="arrHome" class="arr-control" type="button" title="To start" aria-label="To start">⏮</button>
-                    <button id="arrPlay" class="arr-control arr-primary" type="button" title="Play" aria-label="Play">▶</button>
-                    <button id="arrPause" class="arr-control" type="button" title="Pause" aria-label="Pause">Ⅱ</button>
-                    <button id="arrStop" class="arr-control" type="button" title="Stop" aria-label="Stop">■</button>
-                    <button id="arrEnd" class="arr-control" type="button" title="To end" aria-label="To end">⏭</button>
+                    <button id="arrHome" class="arr-control" type="button" title="To start" aria-label="To start"><span class="material-icon" aria-hidden="true">skip_previous</span></button>
+                    <button id="arrPlay" class="arr-control arr-primary" type="button" title="Play" aria-label="Play"><span class="material-icon" aria-hidden="true">play_arrow</span></button>
+                    <button id="arrPause" class="arr-control" type="button" title="Pause" aria-label="Pause"><span class="material-icon" aria-hidden="true">pause</span></button>
+                    <button id="arrStop" class="arr-control" type="button" title="Stop" aria-label="Stop"><span class="material-icon" aria-hidden="true">stop</span></button>
+                    <button id="arrEnd" class="arr-control" type="button" title="To end" aria-label="To end"><span class="material-icon" aria-hidden="true">skip_next</span></button>
                 </div>
                 <output id="arrTime" class="arr-time">0:00.0 / 0:00.0</output>
                 <div class="arr-toolbar-options">
-                    <button id="arrLoopBtn" class="arr-control arr-loop active" type="button" aria-pressed="true">↻ Loop</button>
+                    <button aria-label="Loop" title="Loop" id="arrLoopBtn" class="arr-control arr-loop active" type="button" aria-pressed="true"><span class="material-icon" aria-hidden="true">repeat</span></button>
                     <label class="arr-volume" title="Master volume">
                         <span>Volume</span>
                         <input id="arrMasterVol" type="range" min="0" max="100" value="100">
@@ -46,8 +46,8 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
                 <div class="arr-content" id="arrContent">
                     <div class="arr-loop-markers" id="arrLoopMarkers" style="height:${LOOP_H}px">
                         <div class="arr-loop-range" id="arrLoopRange"></div>
-                        <div class="arr-loop-mark start" id="arrLoopStart" data-edge="start">▼</div>
-                        <div class="arr-loop-mark end" id="arrLoopEnd" data-edge="end">▼</div>
+                        <div class="arr-loop-mark start" id="arrLoopStart" data-edge="start" title="Loop start"><span class="material-icon" aria-hidden="true">arrow_right</span></div>
+                        <div class="arr-loop-mark end" id="arrLoopEnd" data-edge="end" title="Loop end"><span class="material-icon" aria-hidden="true">arrow_left</span></div>
                     </div>
                     <div class="arr-ruler" id="arrRuler" style="height:${RULER_H}px"></div>
                     <div class="arr-rows" id="arrRows"></div>
@@ -75,7 +75,7 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
     const state = {
         loopEnabled: true,
         loopStartTick: 0,
-        loopEndTick: 0,   // 0 = автоматически до конца аранжировки
+        loopEndTick: null, // null = end of arrangement; equal explicit markers = no loop
         dragMode: null,
         dragClip: null,
         paint: null,
@@ -89,6 +89,9 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
     let playbackRequest = 0;
     let loadedSequence = null;
     let loading = false;
+    let reloadTimer;
+    let reloadPending = false;
+    let playbackDirty = false;
     let pausedByUser = false;
     let lastFramePlaying = false;
     let seekingUntil = 0;
@@ -124,11 +127,21 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
         return end;
     };
 
-    const effectiveLoopEnd = () => {
-        return state.loopEndTick > state.loopStartTick
-            ? state.loopEndTick
-            : arrangementDurationTick();
+    const effectiveLoopEnd = () => state.loopEndTick ?? arrangementDurationTick();
+    const hasLoop = () => state.loopEnabled && effectiveLoopEnd() > state.loopStartTick;
+    const updateLoopButton = () => {
+        loopBtn.classList.toggle('active', hasLoop());
+        loopBtn.setAttribute('aria-pressed', String(hasLoop()));
     };
+    const updatePlayback = () => {
+        playbackDirty = true;
+        clearTimeout(reloadTimer);
+        const seq = getSequencer();
+        if (loadedSequence === getSeq() && seq && !seq.paused && !seq.isFinished) {
+            reloadTimer = setTimeout(() => play(true), 100);
+        } else if (loading) reloadPending = true;
+    };
+    const edit = () => { onEdit?.(); updatePlayback(); markDirty(); };
 
     // ==================================================================
     // Render
@@ -151,7 +164,9 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
         loopRange.style.left   = sx + 'px';
         loopRange.style.width  = (ex - sx) + 'px';
         const show = state.loopEnabled;
-        loopRange.style.display   = show ? 'block' : 'none';
+        loopRange.style.display   = hasLoop() ? 'block' : 'none';
+        loopStartEl.style.zIndex = sx === ex ? '2' : '';
+        updateLoopButton();
         loopStartEl.style.display = show ? 'block' : 'none';
         loopEndEl.style.display   = show ? 'block' : 'none';
 
@@ -162,14 +177,13 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
     const renderRows = () => {
         const s = getSeq();
         if (!s) { rows.innerHTML = ''; return; }
-        const channels = s.channels || [];
+        const channels = s.channels.filter(c => c.created !== false).sort((a, b) => a.channel - b.channel);
         const catalog = getInstrumentCatalog();
         const patterns = new Map(s.patterns.map(p => [p.id, p]));
-        const rowCount = Math.max(MIN_CHANNEL_ROWS, channels.reduce((max, c) => Math.max(max, c.channel + 1), 0));
-        const byChannel = Array.from({ length: rowCount }, () => []);
+        const byChannel = new Map(channels.map(c => [c.channel, []]));
         for (const pl of s.arrangement) {
             const pat = patterns.get(pl.patternId);
-            if (pat && byChannel[pat.channel]) byChannel[pat.channel].push([pl, pat]);
+            if (pat) byChannel.get(pat.channel)?.push([pl, pat]);
         }
         const thumbnails = new Map();
         const patternPreview = (pat) => {
@@ -190,24 +204,10 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
         };
         let html = '';
 
-        for (let i = 0; i < rowCount; i++) {
-            const ch = channels.find(c => c.channel === i);
-            const created = !!ch && ch.created !== false;
+        for (const ch of channels) {
+            const i = ch.channel;
             const color = chanColor(i);
-            const muted = !!ch?.muted;
-
-            if (!created) {
-                // Empty slot
-                html += `<div class="arr-row arr-row-empty" data-slot="${i}">`;
-                html += `  <div class="arr-chan" style="width:${CHAN_W}px" role="button" tabindex="0" aria-label="Create channel ${i + 1}">`;
-                html += `    <span class="arr-radio"></span>`;
-                html += `    <span class="arr-chan-name muted">— empty —</span>`;
-                html += `  </div>`;
-                html += `  <div class="arr-clips" style="--bar-w:${barW()}px"></div>`;
-                html += `</div>`;
-                continue;
-            }
-
+            const muted = !!ch.muted;
             html += `<div class="arr-row" data-channel="${i}">`;
             html += `  <div class="arr-chan" data-channel="${i}" style="width:${CHAN_W}px" role="button" tabindex="0" title="Ch ${i + 1} · Edit notes in Piano Roll">`;
             html += `    <span class="arr-dot" data-channel="${i}"
@@ -220,7 +220,7 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
             html += `    <span class="arr-chan-bar" style="background:${color}"></span>`;
             html += `  </div>`;
             html += `  <div class="arr-clips" data-channel="${i}" style="--bar-w:${barW()}px">`;
-            for (const [pl, pat] of byChannel[i]) {
+            for (const [pl, pat] of byChannel.get(i)) {
                 const selected = state.selectedPlacement === pl.id ? ' selected' : '';
                 const left = tickToX(pl.startTick) - CHAN_W;
                 const right = tickToX(pl.startTick + pat.lengthTicks) - CHAN_W;
@@ -234,6 +234,7 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
             html += `</div>`;
         }
 
+        html += `<div class="arr-row arr-add-row"><div class="arr-chan"><button type="button" class="btn" id="arrAddChannel" title="Add channel">+ ADD</button></div></div>`;
         rows.innerHTML = html;
         wireRowEvents();
     };
@@ -277,13 +278,10 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
     // Event wiring
     // ==================================================================
     const wireRowEvents = () => {
-        // The header opens the channel. Timeline interactions never change views.
-        rows.querySelectorAll('.arr-chan').forEach(header => {
+        // The header opens the channel; a timeline double-click opens an exact clip.
+        rows.querySelectorAll('.arr-row[data-channel] .arr-chan').forEach(header => {
             const row = header.closest('.arr-row');
-            const activate = () => {
-                if (row.dataset.slot !== undefined) openChannelDialog({ slot: Number(row.dataset.slot) });
-                else onOpenChannel?.(Number(row.dataset.channel));
-            };
+            const activate = () => onOpenChannel?.(Number(row.dataset.channel));
             header.addEventListener('click', activate);
             header.addEventListener('keydown', (e) => {
                 if (e.key !== 'Enter' && e.key !== ' ') return;
@@ -292,7 +290,6 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
                 activate();
             });
             header.addEventListener('contextmenu', (e) => {
-                if (row.dataset.channel === undefined) return;
                 e.preventDefault();
                 e.stopPropagation();
                 openChannelContextMenu(Number(row.dataset.channel));
@@ -307,8 +304,8 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
                 muteTimer = setTimeout(() => {
                     muteTimer = null;
                     const ch = Number(dot.dataset.channel);
-                    toggleMuteChannel(ch, null);
-                    markDirty();
+                    toggleMuteChannel(ch);
+                    onEdit?.(); markDirty();
                 }, 220);
             });
             dot.addEventListener('dblclick', (e) => {
@@ -323,7 +320,7 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
                     c.muted = targetState;    // копируем состояние этой точки на все
                     applyChannel(c.channel);
                 });
-                markDirty();
+                onEdit?.(); markDirty();
             });
         });
 
@@ -347,6 +344,7 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
             const id = e.target.closest('.arr-clip')?.dataset.placement;
             if (id && s.arrangement.some(p => p.id === id)) {
                 s.arrangement = s.arrangement.filter(p => p.id !== id);
+                paint.changed = true;
                 markDirty();
             }
         } else {
@@ -356,11 +354,25 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
             const start = bar * tpb();
             if (!clipsAt(paint.channel, start, pat.lengthTicks)) {
                 s.placePattern(pat.id, start);
+                paint.changed = true;
                 markDirty();
             }
             paint.lastBar = bar;
         }
     };
+
+    rows.addEventListener('click', (e) => {
+        if (!e.target.closest('#arrAddChannel')) return;
+        const slot = getSeq().channels.reduce((next, ch) => Math.max(next, ch.channel + 1), 0);
+        if (slot < 2048) openChannelDialog({ slot, isNew: true });
+        else setStatus('No free MIDI port/channel');
+    });
+    rows.addEventListener('dblclick', (e) => {
+        const clip = e.target.closest('.arr-clip');
+        if (!clip) return;
+        const placement = getSeq()?.arrangement.find(p => p.id === clip.dataset.placement);
+        if (placement) onOpenChannel?.(Number(clip.dataset.channel), placement.patternId);
+    });
 
     rows.addEventListener('pointerdown', (e) => {
         if (e.button !== 0 && e.button !== 2) return;
@@ -489,7 +501,7 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
 
             if (loadedSequence === s) applyChannelVolume(chObj);
             overlay.remove();
-            markDirty();
+            edit();
         });
     };
 
@@ -530,7 +542,7 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
                     // Remove all placements of those patterns
                     const alivePatIds = new Set(s.patterns.map(p => p.id));
                     s.arrangement = s.arrangement.filter(pl => alivePatIds.has(pl.patternId));
-                    markDirty();
+                    edit();
                 } else if (act === 'up' || act === 'down') {
                     const channels = s.channels.filter(c => c.created !== false);
                     const sorted = [...channels].sort((a, b) => a.channel - b.channel);
@@ -538,7 +550,7 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
                     const swapIdx = act === 'up' ? idx - 1 : idx + 1;
                     if (swapIdx < 0 || swapIdx >= sorted.length) return;
                     s.swapChannels(sorted[idx].channel, sorted[swapIdx].channel);
-                    markDirty();
+                    edit();
                 }
             });
         });
@@ -566,9 +578,9 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
             const x = e.clientX - rect.left;
             const tick = Math.round(xToTick(x) / tpb()) * tpb();
             if (state.dragMode === 'loop-start') {
-                state.loopStartTick = Math.max(0, Math.min(tick, effectiveLoopEnd() - tpb()));
+                state.loopStartTick = Math.max(0, Math.min(tick, effectiveLoopEnd()));
             } else {
-                state.loopEndTick = Math.max(tick, state.loopStartTick + tpb());
+                state.loopEndTick = Math.max(tick, state.loopStartTick);
             }
             markDirty();
         }
@@ -583,8 +595,10 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
             return;
         }
         if (state.paint?.pointerId === e.pointerId) {
+            const changed = state.paint.changed;
             state.paint = null;
-            markDirty();
+            if (changed) edit();
+            else markDirty();
         }
         const d = state.dragClip;
         if (d && d.pointerId !== e.pointerId) return;
@@ -592,11 +606,12 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
             const pattern = d.sequence.getPattern(d.placement.patternId);
             if (e.type !== 'pointercancel' && d.moved && pattern && d.sequence === getSeq() &&
                 !clipsAt(d.channel, d.nextTick, pattern.lengthTicks, d.placement)) {
-                d.placement.startTick = d.nextTick;
+                if (d.placement.startTick !== d.nextTick) { d.placement.startTick = d.nextTick; edit(); }
             }
             d.el.classList.remove('dragging');
             if (d.moved) markDirty();
         }
+        if (state.dragMode === 'loop-start' || state.dragMode === 'loop-end') updatePlayback();
         state.dragMode = null;
         state.dragClip = null;
     };
@@ -627,19 +642,6 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
         const rect = ruler.getBoundingClientRect();
         const x = e.clientX - rect.left;
         if (x < CHAN_W + body.scrollLeft) return;
-        if (e.button === 2) {
-            e.preventDefault();
-            const bar = xToBar(x);
-            state.loopStartTick = bar * tpb();
-            state.loopEndTick   = state.loopStartTick + tpb();
-            state.loopEnabled   = true;
-            loopBtn.classList.add('active');
-            loopBtn.setAttribute('aria-pressed', 'true');
-            const seq = getSequencer?.();
-            if (seq) seq.loopCount = Infinity;
-            markDirty();
-            return;
-        }
         if (e.button !== 0) return;
         state.dragMode = 'seek';
         state.seekPointer = e.pointerId;
@@ -650,9 +652,20 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
     ruler.addEventListener('pointerdown', onRulerDown);
     ruler.addEventListener('contextmenu', (e) => e.preventDefault());
 
+    $('#arrLoopMarkers').addEventListener('contextmenu', e => {
+        e.preventDefault();
+        const x = e.clientX - ruler.getBoundingClientRect().left;
+        if (x < CHAN_W + body.scrollLeft) return;
+        const tick = Math.round(xToTick(x) / tpb()) * tpb();
+        state.loopStartTick = state.loopEndTick = tick;
+        state.loopEnabled = true;
+        updatePlayback(); markDirty();
+    });
+
     [['#arrLoopStart', 'loop-start'], ['#arrLoopEnd', 'loop-end']].forEach(([sel, mode]) => {
         const el = $(sel);
         el.addEventListener('pointerdown', (e) => {
+            if (e.button !== 0) return;
             e.preventDefault();
             e.stopPropagation();
             state.dragMode = mode;
@@ -674,43 +687,56 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
         pauseBtn.disabled = !loaded || seq.paused;
     };
 
-    const play = async () => {
+    const play = async (reload = false) => {
         const s = getSeq();
-        if (!s?.arrangement.length || loading || rootEl.inert) return;
+        if (rootEl.inert) return;
+        if (!s?.arrangement.length) { if (reload === true) stop(); return; }
+        if (loading) { if (reload === true) reloadPending = true; return; }
         const request = ++playbackRequest;
         loading = true;
         updateTransportUI();
         const current = () => request === playbackRequest && state.visible && !rootEl.inert && s === getSeq();
-        const end = Math.max(effectiveLoopEnd(), state.loopStartTick + tpb());
-        const loop = { start: state.loopStartTick, end };
+
         try {
             await initSynth();
             if (!current()) return;
             const seq = getSequencer();
-            const resume = loadedSequence === s && pausedByUser && !seq.isFinished;
+            const resume = !playbackDirty && reload !== true && loadedSequence === s && pausedByUser && !seq.isFinished;
+            if (reload === true && !seq.paused && !seq.isFinished) state.cursorTick = s.secondsToTicks(seq.currentTime);
+            const loop = hasLoop() ? { start: state.loopStartTick, end: effectiveLoopEnd() } : null;
             if (!resume) {
-                const midi = writeArrangementMIDI(s, { loop, respectMute: true });
+                playbackDirty = false;
+                const midi = writeArrangementMIDI(s, { loop, liveMix: true });
                 if (!await loadSong(midi, 'arrangement', seq, current)) return;
                 loadedSequence = s;
             }
             pausedByUser = false;
-            seq.loopCount = state.loopEnabled ? Infinity : 0;
+            seq.loopCount = loop ? Infinity : 0;
             // Time is set after loading, even when the ruler was clicked before the first Play.
-            if (s.ticksToSeconds(state.cursorTick) >= seq.duration) state.cursorTick = 0;
+            if (s.ticksToSeconds(state.cursorTick) >= seq.duration ||
+                (loop && state.loopEndTick !== null && (state.cursorTick < loop.start || state.cursorTick >= loop.end))) {
+                state.cursorTick = loop?.start ?? 0;
+            }
             const position = Math.min(seq.duration, s.ticksToSeconds(state.cursorTick));
             if (position > 0 || resume) seq.currentTime = position;
             seekingUntil = performance.now() + 100;
+            applyChannelMix(s);
             seq.play();
         } catch (err) {
             if (current()) { setStatus(err.message); log(`Arranger play: ${err}`, 'error'); }
         } finally {
-            if (request === playbackRequest) loading = false;
+            if (request === playbackRequest) {
+                loading = false;
+                if (reloadPending) { reloadPending = false; updatePlayback(); }
+            }
             updateTransportUI();
         }
     };
 
     const pause = () => {
         renderPlayhead();
+        clearTimeout(reloadTimer); reloadPending = false;
+        if (loading) { playbackRequest++; loading = false; playbackDirty = true; }
         pausedByUser = true;
         getSequencer()?.pause();
         updateTransportUI();
@@ -718,6 +744,7 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
 
     const stop = () => {
         playbackRequest++;
+        clearTimeout(reloadTimer); reloadPending = false;
         loading = pausedByUser = lastFramePlaying = false;
         state.cursorTick = 0;
         const seq = getSequencer?.();
@@ -726,18 +753,18 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
         updateTransportUI();
     };
 
-    playBtn?.addEventListener('click', play);
+    playBtn?.addEventListener('click', () => play());
+    $('#arrMixer')?.addEventListener('click', () => onMixer?.());
     pauseBtn?.addEventListener('click', pause);
     $('#arrStop')?.addEventListener('click', stop);
     $('#arrHome')?.addEventListener('click', () => seekTick(0, true));
     $('#arrEnd')?.addEventListener('click', () => seekTick(arrangementDurationTick(), true));
     loopBtn?.addEventListener('click', () => {
         state.loopEnabled = !state.loopEnabled;
-        loopBtn.classList.toggle('active', state.loopEnabled);
-        loopBtn.setAttribute('aria-pressed', String(state.loopEnabled));
-        const seq = getSequencer?.();
-        if (seq) seq.loopCount = state.loopEnabled ? Infinity : 0;
-        markDirty();
+        if (state.loopEnabled && state.loopStartTick === effectiveLoopEnd()) {
+            state.loopStartTick = 0; state.loopEndTick = null;
+        }
+        updatePlayback(); markDirty();
     });
     bindMasterVolume($('#arrMasterVol'));
 
@@ -745,7 +772,7 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
     // Keyboard
     // ==================================================================
     document.addEventListener('keydown', (e) => {
-        if (!state.visible || rootEl.inert || document.querySelector('.arr-dialog-overlay, .pr-picker-overlay:not(.hidden)')) return;
+        if (!state.visible || rootEl.inert || document.querySelector('dialog[open], .arr-dialog-overlay, .pr-picker-overlay:not(.hidden)')) return;
         const active = document.activeElement;
         if (active && ['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON'].includes(active.tagName)) return;
 
@@ -788,7 +815,8 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
         play, pause, stop,
         reset() {
             loadedSequence = null;
-            state.loopStartTick = state.loopEndTick = state.cursorTick = 0;
+            state.loopStartTick = state.cursorTick = 0;
+            state.loopEndTick = null;
             state.selectedPlacement = null;
             body.scrollTo(0, 0);
             markDirty();

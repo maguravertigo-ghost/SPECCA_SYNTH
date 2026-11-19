@@ -1,8 +1,9 @@
-import { getPreviewSequencer, getSynth, loadSong, initSynth, bindMasterVolume } from '../core/synth.js';
+import { getPreviewSequencer, getSynth, getMidiMixChannels, applyLiveMix, loadSong, initSynth, bindMasterVolume } from '../core/synth.js';
 import { importMidi } from '../editor/importMidi.js';
 import { adaptToSoundfont } from '../editor/instruments.js';
 import { writeArrangementMIDI } from '../editor/exportMidi.js';
 import { log } from '../core/log.js';
+import { openMixer } from './mixer.js';
 import { mountPlaylistView } from './playlistView.js';
 
 const formatTime = (time) => {
@@ -24,6 +25,9 @@ export function mountPlayerOverlay({ playlist, onOpen, onClose } = {}) {
     const next = $('#ptNext');
     const title = $('#ptTrackName');
     const status = $('#ptStatus');
+    const mixerBtn = $('#ptMixer');
+    let mixChannels = [];
+    let mixer;
     const compatible = $('#ptCompatible');
     bindMasterVolume($('#ptVolume'));
     let active = null, loaded = null, pending = false, request = 0, frame = 0, restoreFocus;
@@ -36,6 +40,7 @@ export function mountPlayerOverlay({ playlist, onOpen, onClose } = {}) {
         const ready = !!seq && loaded?.id === active?.id && !!loaded && !pending;
         const playing = ready && !seq.paused && !seq.isFinished;
         playBtn.disabled = pending || !playlist.items.length || playing;
+        mixerBtn.disabled = !ready || !mixChannels.length;
         pauseBtn.disabled = !playing;
         stopBtn.disabled = !ready && !pending;
         previous.disabled = index <= 0;
@@ -70,6 +75,8 @@ export function mountPlayerOverlay({ playlist, onOpen, onClose } = {}) {
         getPreviewSequencer()?.pause();
         active = item;
         loaded = null;
+        mixer?.close();
+        mixChannels = [];
         playlist.activeId = item.id;
         listView.refresh();
         pending = true;
@@ -93,6 +100,7 @@ export function mountPlayerOverlay({ playlist, onOpen, onClose } = {}) {
             if (!await loadSong(buffer, item.name, seq, current)) return;
             if (!seq.duration) throw new Error('No playable MIDI duration. Try Compatible if the source contains notes.');
             loaded = item;
+            mixChannels = getMidiMixChannels(seq);
             seq.loopCount = 0;
             seq.play();
             status.textContent = 'Playing';
@@ -167,6 +175,9 @@ export function mountPlayerOverlay({ playlist, onOpen, onClose } = {}) {
             refresh();
         } catch (err) { if (visible() && id === request) status.textContent = err.message; }
     });
+    mixerBtn.addEventListener('click', () => {
+        mixer = openMixer({ title: 'Player mixer', channels: mixChannels, onChange: channel => applyLiveMix(channel.index, channel) });
+    });
     pauseBtn.addEventListener('click', () => { getPreviewSequencer()?.pause(); status.textContent = 'Paused'; refresh(); });
     stopBtn.addEventListener('click', () => stop());
     compatible.addEventListener('change', () => { if (active) select(active); });
@@ -199,8 +210,8 @@ export function mountPlayerOverlay({ playlist, onOpen, onClose } = {}) {
     closeBtn.addEventListener('click', close);
     overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
     document.addEventListener('keydown', (e) => {
-        if (e.key === 'F5' && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) { e.preventDefault(); toggle(); }
-        if (e.key === 'Escape' && visible()) close();
+        if (e.key === 'F5' && !document.querySelector('dialog[open]') && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) { e.preventDefault(); toggle(); }
+        if (e.key === 'Escape' && visible() && !mixer?.open) close();
     });
     $('#addFilesBtn').addEventListener('click', () => input.click());
     input.addEventListener('change', async () => {

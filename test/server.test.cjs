@@ -15,6 +15,9 @@ test('server starts on a free port and serves only app assets', async () => {
         assert.equal((await fetch(url)).status, 200);
         const module = await fetch(`${url}/js/core/synth.js`, { method: 'HEAD' });
         assert.match(module.headers.get('content-type'), /javascript/);
+        const font = await fetch(`${url}/icons/MaterialIcons-Regular.woff2`, { method: 'HEAD' });
+        assert.equal(font.status, 200);
+        assert.equal(font.headers.get('content-type'), 'font/woff2');
         assert.equal((await fetch(`${url}/server.js`)).status, 404);
         assert.equal((await fetch(`${url}/.git/HEAD`)).status, 404);
         for (const range of ['bytes=0-3', 'bytes=-4']) {

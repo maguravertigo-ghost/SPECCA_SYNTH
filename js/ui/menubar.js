@@ -17,7 +17,6 @@ const ACTIONS = {
     'edit-delete':       'del',
 
     'player-open':       'openPlayer',
-	'player-mixer':      'mixer',
     'player-save-playlist':  'savePlaylist',
     'player-clear-playlist': 'clearPlaylist',
 };

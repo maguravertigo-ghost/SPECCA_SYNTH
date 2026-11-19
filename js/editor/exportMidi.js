@@ -14,7 +14,7 @@ function gsMessage(part, parameter, value) {
 const gsPart = channel => channel === 9 ? 0 : channel < 9 ? channel + 1 : channel;
 const marker = text => [0xff, 0x06, text.length, ...Array.from(text, c => c.charCodeAt(0))];
 
-function writeSequence(sequence, clips, { loop = null, respectMute = false, previewAt = null } = {}) {
+function writeSequence(sequence, clips, { loop = null, respectMute = false, liveMix = false, previewAt = null } = {}) {
     const meta = [];
     const ports = new Map();
     const active = new Set();
@@ -57,7 +57,7 @@ function writeSequence(sequence, clips, { loop = null, respectMute = false, prev
         emit(0, -4, [0xb0 | ch, 0, (info.bankMSB ?? 0) & 0x7f], port);
         emit(0, -3, [0xb0 | ch, 32, (info.bankLSB ?? 0) & 0x7f], port);
         emit(0, -2, [0xc0 | ch, (info.program ?? 0) & 0x7f], port);
-        const volume = respectMute && info.muted ? 0 : (info.volume ?? 100);
+        const volume = liveMix ? 100 : respectMute && info.muted ? 0 : (info.volume ?? 100);
         emit(0, -1, [0xb0 | ch, 7, Math.round(volume * 127 / 100)], port);
         emit(0, -1, [0xb0 | ch, 10, (info.pan ?? 64) & 0x7f], port);
     }
@@ -111,10 +111,10 @@ function writeSequence(sequence, clips, { loop = null, respectMute = false, prev
     return out.buffer;
 }
 
-export function writePatternMIDI(sequence, patternId, previewAt = 0) {
+export function writePatternMIDI(sequence, patternId, previewAt = 0, options = {}) {
     const pattern = sequence.getPattern(patternId);
     if (!pattern) throw new Error('No pattern ' + patternId);
-    return writeSequence(sequence, [{ pattern, startTick: 0, trim: true }], { loop: {}, respectMute: true, previewAt });
+    return writeSequence(sequence, [{ pattern, startTick: 0, trim: true }], { loop: {}, respectMute: true, previewAt, ...options });
 }
 
 export function writeArrangementMIDI(sequence, options) {

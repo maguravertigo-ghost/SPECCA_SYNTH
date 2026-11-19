@@ -23,7 +23,7 @@ export function createSoundFontSource(url, { stallMs = 60000, fetchFile = (...ar
                 timer = setTimeout(() => { timedOut = true; cancel(); }, stallMs);
             };
             const label = 'Loading bundled soundfont.sf2';
-            onStatus(label);
+            onStatus(label, { loaded: 0 });
             try {
                 resetTimeout();
                 const response = await fetchFile(url, { signal: controller.signal });
@@ -47,7 +47,7 @@ export function createSoundFontSource(url, { stallMs = 60000, fetchFile = (...ar
                             lastReport = loaded;
                             const size = `${(loaded / MIB).toFixed(1)} MiB`;
                             const volume = total >= loaded ? `${size} / ${(total / MIB).toFixed(1)} MiB` : size;
-                            onStatus(`SoundFont · ${volume}`, true);
+                            onStatus(`SoundFont · ${volume}`, { loaded, total });
                         }
                     }
                 } finally {

@@ -21,6 +21,7 @@ export class Sequence {
             { channel: 2, program: 0, isDrum: false, volume: 100, pan: 64 },
             { channel: 9, program: 0, isDrum: true,  volume: 100, pan: 64 },
         ];
+        this.patternCounters = data.patternCounters ?? {};
         this.patterns = data.patterns ?? [];
         this.arrangement = data.arrangement ?? [];
     }
@@ -54,7 +55,7 @@ export class Sequence {
         seq.arrangement = [...seq.arrangement, ...extraPlacements];
         return seq;
     }
-    toJSON() {
+    toJSON(indent = 2) {
         return JSON.stringify({
             version: this.version,
             name: this.name,
@@ -64,9 +65,10 @@ export class Sequence {
             stepsPerBar: this.stepsPerBar,
             patternLengthTicks: this.patternLengthTicks,
             channels: this.channels,
+            patternCounters: this.patternCounters,
             patterns: this.patterns,
             arrangement: this.arrangement,
-        }, null, 2);
+        }, null, indent);
     }
 
     getPattern(id) {
@@ -83,12 +85,19 @@ export class Sequence {
         return this.patterns.find(p => p.channel === channel) ?? null;
     }
 
+    createChannelPattern(channel) {
+        const prefix = `${channel + 1}.`;
+        const highest = this.patterns.reduce((max, p) => {
+            if (p.channel !== channel || !p.name?.startsWith(prefix)) return max;
+            const number = Number(p.name.slice(prefix.length));
+            return Number.isSafeInteger(number) ? Math.max(max, number) : max;
+        }, this.patternCounters[channel] ?? 0);
+        this.patternCounters[channel] = highest + 1;
+        return this.addPattern({ name: `${prefix}${highest + 1}`, channel, lengthTicks: this.patternLengthTicks });
+    }
+
     ensureChannelPattern(channel) {
-        return this.getChannelPattern(channel) ?? this.addPattern({
-            name: `Pattern ${this.patterns.length + 1}`,
-            channel,
-            lengthTicks: this.patternLengthTicks,
-        });
+        return this.getChannelPattern(channel) ?? this.createChannelPattern(channel);
     }
 
     swapChannels(first, second) {

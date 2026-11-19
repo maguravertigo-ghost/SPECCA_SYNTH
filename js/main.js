@@ -1,6 +1,6 @@
 // js/main.js
 import { log, setStatus, wireGlobalErrorHandlers } from './core/log.js';
-import { initSynth, onAudioStatus, selectLocalSoundFont, getAudioContext, getSequencer, getOutputLevel, getMasterVolume, getSynth } from './core/synth.js';
+import { initSynth, onAudioStatus, selectLocalSoundFont, applyChannelVolume, getAudioContext, getSequencer, getOutputLevel, getMasterVolume, getSynth } from './core/synth.js';
 import { Playlist } from './playlist.js';
 import { mountMenubar } from './ui/menubar.js';
 import { mountPlayerOverlay } from './ui/playerOverlay.js';
@@ -8,6 +8,8 @@ import { mountPianoRoll } from './editor/pianoRoll.js';
 import { importMidi } from './editor/importMidi.js';
 import { adaptToSoundfont } from './editor/instruments.js';
 import { writeArrangementMIDI } from './editor/exportMidi.js';
+import { openMixer } from './ui/mixer.js';
+import { createEditHistory } from './editor/history.js';
 import { Sequence } from './editor/sequence.js';
 import { openProjectSettings } from './ui/projectSettings.js';
 import { mountArranger } from './ui/arrangerView.js';
@@ -37,6 +39,28 @@ const playlist = new Playlist();
 let pianoRoll = null;
 let currentSequence = null;
 let lastLoadedName = null;
+const history = createEditHistory();
+let menubar;
+const syncHistory = () => {
+    menubar?.setEnabled('undo', history.canUndo);
+    menubar?.setEnabled('redo', history.canRedo);
+};
+const commitEdit = () => {
+    if (currentSequence && history.commit(currentSequence.toJSON(0))) syncHistory();
+};
+function restoreEdit(action) {
+    const snapshot = history[action]();
+    if (!snapshot) return;
+    arrangerView?.stop(); pianoRoll?.stop();
+    currentSequence = Sequence.fromJSON(snapshot);
+    const channel = pianoRoll?.getChannel();
+    if (channel != null && !currentSequence.channels.some(c => c.channel === channel)) showArranger();
+    refreshAll(); syncHistory();
+}
+const showProjectMixer = () => openMixer({ title: 'Project mixer',
+    channels: currentSequence.channels.filter(c => c.created !== false).sort((a,b) => a.channel - b.channel),
+    onChange: channel => { applyChannelVolume(channel); arrangerView?.refresh(); }, onCommit: commitEdit,
+});
 const selectedPatterns = new Map();
 const getChannelPattern = (channel) => {
     const selected = currentSequence?.getPattern(selectedPatterns.get(channel));
@@ -72,6 +96,7 @@ const createEmptySequence = () => {
 
 function useSequence(sequence, name = null) {
     currentSequence = sequence;
+    history.reset(sequence.toJSON(0)); syncHistory();
     lastLoadedName = name;
     selectedPatterns.clear();
     pianoRoll?.setChannel(null);
@@ -92,6 +117,19 @@ function openMidiBuffer(buffer, name) {
 function mountAudioStatus() {
     const button = document.getElementById('audioUnlock');
     const statuses = [document.getElementById('audioState'), document.getElementById('ptAudioState')];
+    const picker = document.getElementById('soundFontChoice');
+    const startupFont = document.getElementById('startupSoundFont');
+    const useLocal = document.getElementById('chooseStartupFont');
+    startupFont.addEventListener('change', () => { useLocal.disabled = !startupFont.files.length; });
+    const start = () => { picker.close(); initSynth().catch(() => {}); };
+    const useBundled = document.getElementById('chooseBundledFont');
+    if (location.hostname.endsWith('github.io')) useBundled.textContent = 'Load from GitHub Pages';
+    useBundled.addEventListener('click', start);
+    useLocal.addEventListener('click', () => {
+        const file = startupFont.files?.[0];
+        if (file && selectLocalSoundFont(file)) start();
+    });
+    picker.showModal();
     const fontInput = document.getElementById('localSoundFont');
     const fontButtons = [...document.querySelectorAll('[data-local-soundfont]')];
     for (const choose of fontButtons) choose.addEventListener('click', () => fontInput.click());
@@ -103,7 +141,7 @@ function mountAudioStatus() {
     button.addEventListener('click', () => initSynth().catch(() => {}));
     onAudioStatus(({ state, message, progress, canSelectFont = true }) => {
         for (const status of statuses) {
-            status.setAttribute('aria-live', progress ? 'off' : 'polite');
+            status.setAttribute('aria-live', progress?.loaded ? 'off' : 'polite');
             status.textContent = status.title = message;
             status.dataset.state = state;
         }
@@ -111,10 +149,15 @@ function mountAudioStatus() {
             choose.disabled = !canSelectFont;
             choose.hidden = state === 'ready';
         }
+        for (const bar of document.querySelectorAll('[data-font-progress]')) {
+            bar.hidden = progress?.loaded == null;
+            if (progress?.total > 0) { bar.max = progress.total; bar.value = progress.loaded; }
+            else bar.removeAttribute('value');
+        }
         button.disabled = state === 'loading';
         button.hidden = state === 'ready';
         button.textContent = state === 'error' ? 'Retry audio' : 'Enable audio';
-        if (state !== 'idle' && !progress) log(`Audio: ${message}`, state === 'error' ? 'error' : 'info');
+        if (state !== 'idle' && !progress?.loaded) log(`Audio: ${message}`, state === 'error' ? 'error' : 'info');
         if (state === 'ready') refreshAll();
     });
 
@@ -178,6 +221,8 @@ if (editorRoot) {
         getSequence:          () => currentSequence,
         getChannelPattern,
         onPatternSelect: (channel, id) => selectedPatterns.set(channel, id),
+        onEdit: commitEdit,
+        onMixer: showProjectMixer,
         onInstrumentChange: () => arrangerView?.refresh(),
         onBackToArranger:     () => showArranger(),
     });
@@ -187,8 +232,11 @@ if (arrangerRoot) {
         getSequence: () => currentSequence,
         getChannelPattern,
         onSelectPattern: (channel, id) => selectedPatterns.set(channel, id),
-        onOpenChannel: (channel) => {
-            currentSequence.ensureChannelPattern(channel);
+        onEdit: commitEdit,
+        onMixer: showProjectMixer,
+        onOpenChannel: (channel, patternId) => {
+            if (patternId) selectedPatterns.set(channel, patternId);
+            if (!currentSequence.getChannelPattern(channel)) { currentSequence.ensureChannelPattern(channel); commitEdit(); }
             pianoRoll?.setChannel(channel);
             showPianoRoll();
         },
@@ -261,7 +309,7 @@ const openProjectDialog = () => {
 };
 
 // ---------------- Menubar ----------------
-const menubar = mountMenubar({
+menubar = mountMenubar({
     new: () => {
         openProjectSettings({
             title: 'New Project',
@@ -303,14 +351,13 @@ const menubar = mountMenubar({
         }
     },
 
-    undo: () => log('Menu: Undo (TODO)'),
-    redo: () => log('Menu: Redo (TODO)'),
+    undo: () => restoreEdit('undo'),
+    redo: () => restoreEdit('redo'),
     cut: () => pianoRoll?.editNotes('cut'),
     copy: () => pianoRoll?.editNotes('copy'),
     paste: () => pianoRoll?.editNotes('paste'),
     del: () => pianoRoll?.editNotes('delete'),
 
-    mixer: () => pianoRoll?.openMixer?.(),
     openPlayer: () => playerOverlay?.open(),
     savePlaylist: () => {
         const items = (playlist.items || []).map(i => ({ name: i.name }));
@@ -343,10 +390,20 @@ const menubar = mountMenubar({
                 seq.stepsPerBar = steps;
                 seq.patternLengthTicks = Math.round(seq.timeDivision / 4) * steps * bars;
                 refreshAll();
+                commitEdit();
                 setStatus(`Settings updated: ${bpm}BPM ${bars}×${steps}`);
             },
         });
     },
+});
+
+syncHistory();
+document.addEventListener('keydown', e => {
+    if (!(e.ctrlKey || e.metaKey) || e.altKey || document.querySelector('dialog[open], .arr-dialog-overlay') ||
+        document.querySelector('.menubar')?.inert || e.target.closest?.('input, textarea, select, [contenteditable]')) return;
+    if (e.code === 'KeyZ' || e.code === 'KeyY') {
+        e.preventDefault(); restoreEdit(e.shiftKey || e.code === 'KeyY' ? 'redo' : 'undo');
+    }
 });
 
 const midiInput = document.getElementById('openMidiInput');

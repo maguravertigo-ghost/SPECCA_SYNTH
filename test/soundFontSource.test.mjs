@@ -19,7 +19,7 @@ test('streams the bundled asset, reporting bytes even without Content-Length', a
     const status = [];
     const buffer = await source.read({ signal: signal(), onStatus: (label, progress) => status.push([label, progress]) });
     assert.deepEqual(new Uint8Array(buffer), bytes);
-    assert.deepEqual(status, [['Loading bundled soundfont.sf2', undefined], ['SoundFont · 1.0 MiB', true]]);
+    assert.deepEqual(status, [['Loading bundled soundfont.sf2', { loaded: 0 }], ['SoundFont · 1.0 MiB', { loaded: bytes.length, total: 0 }]]);
 });
 
 test('a selected local file cancels the stalled request and is read without a second fetch', async () => {

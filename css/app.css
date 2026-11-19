@@ -1075,3 +1075,22 @@ body { display: flex; flex-direction: column; }
 .arr-clip-notes path { stroke: rgba(15, 19, 23, .40); stroke-width: 1.25px; vector-effect: non-scaling-stroke; }
 .arr-clip > span { position: relative; pointer-events: none; background: inherit; }
 .audio-meter { width: 49px; height: 10px; flex: none; accent-color: var(--accent); }
+
+@font-face { font-family: 'Material Icons'; src: url('../icons/MaterialIcons-Regular.woff2') format('woff2'); font-display: block; }
+.material-icon { font: normal 21px/1 'Material Icons'; font-feature-settings: 'liga'; letter-spacing: normal; text-transform: none; white-space: nowrap; display: inline-block; vertical-align: middle; }
+.app-version { color: var(--text-mut); font: 11px var(--mono); letter-spacing: 0; }
+#soundFontChoice { max-width: min(440px, 90vw); color: var(--text); }
+#soundFontChoice::backdrop { background: #080810a0; }
+.arr-add-row { min-height: 32px; }
+.arr-add-row button { width: 100%; text-align: left; }
+
+.font-progress { width: 80px; height: 8px; accent-color: var(--accent); }
+
+.mixer-dialog { width: min(530px, 92vw); color: var(--text); }
+.mixer-dialog::backdrop { background: #080810a0; }
+.mixer-list { max-height: 62vh; overflow: auto; }
+.mixer-row { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(80px, 120px) 3ch; align-items: center; gap: 10px; }
+.mixer-row button.active { background: var(--accent); color: #111; }
+
+.arr-loop-mark .material-icon { font-size: 13px; }
+.player-empty-icon.material-icon { font-size: 44px; }

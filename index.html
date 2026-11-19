@@ -10,7 +10,7 @@
 <body>
 
 <header class="menubar">
-    <div class="menubar-logo">🎹 <span>SPESSA</span></div>
+    <div class="menubar-logo"><span class="material-icon" aria-hidden="true">piano</span> <span>SPESSA</span><small class="app-version">v1.1.0</small></div>
     <nav class="menubar-menus">
         <div class="menu" data-menu="file">
             <button class="menu-btn" type="button">File</button>
@@ -41,7 +41,6 @@
             <div class="menu-dropdown">
                 <button data-action="player-open">Open Player… <span class="menu-hint">F5</span></button>
                 <div class="menu-sep"></div>
-                <button data-action="player-mixer">Mixer…</button>
                 <div class="menu-sep"></div>
                 <button data-action="player-save-playlist">Save Playlist</button>
                 <button data-action="player-clear-playlist">Clear Playlist</button>
@@ -61,6 +60,7 @@
         <meter class="audio-meter" min="0" max="1" value="0" aria-label="Audio output level" title="Audio output level"></meter>
         <button id="audioUnlock" class="btn audio-enable" type="button">Enable audio</button>
         <button class="btn audio-enable" data-local-soundfont type="button" title="Choose a SoundFont from your device instead of downloading it">SoundFont…</button>
+        <progress data-font-progress class="font-progress" aria-label="SoundFont download progress" hidden></progress>
         <span id="audioState" class="audio-state" role="status">Audio off · press Play</span>
         <span id="status" class="app-status"></span>
     </div>
@@ -71,7 +71,7 @@
     <div id="editorRoot" class="editor-root" style="display:none"></div>
 </div>
 
-<section id="logPanel" class="log-panel">
+<section id="logPanel" class="log-panel collapsed">
     <div class="log-header">
         <span>Log</span>
         <div>
@@ -87,15 +87,16 @@
     <div class="player-shell">
         <div class="player-header">
             <h2>Player</h2>
-            <button id="playerCloseBtn" class="btn btn-ghost" type="button">✕ Close</button>
+            <button id="playerCloseBtn" class="btn btn-ghost" type="button"><span class="material-icon" aria-hidden="true">close</span> Close</button>
         </div>
 
         <div class="player-transport">
-            <button id="ptPrevious" class="btn" type="button" aria-label="Previous track">⏮</button>
-            <button id="ptPlay"  class="btn btn-play" type="button">▶</button>
-            <button id="ptPause" class="btn" type="button">Pause</button>
-            <button id="ptStop"  class="btn" type="button">Stop</button>
-            <button id="ptNext" class="btn" type="button" aria-label="Next track">⏭</button>
+            <button id="ptMixer" class="btn" type="button" title="Player mixer" aria-label="Player mixer" disabled><span class="material-icon" aria-hidden="true">tune</span></button>
+            <button id="ptPrevious" class="btn" type="button" aria-label="Previous track" title="Previous track"><span class="material-icon" aria-hidden="true">skip_previous</span></button>
+            <button id="ptPlay"  class="btn btn-play" type="button" aria-label="Play" title="Play"><span class="material-icon" aria-hidden="true">play_arrow</span></button>
+            <button id="ptPause" class="btn" type="button" aria-label="Pause" title="Pause"><span class="material-icon" aria-hidden="true">pause</span></button>
+            <button id="ptStop"  class="btn" type="button" aria-label="Stop" title="Stop"><span class="material-icon" aria-hidden="true">stop</span></button>
+            <button id="ptNext" class="btn" type="button" aria-label="Next track" title="Next track"><span class="material-icon" aria-hidden="true">skip_next</span></button>
             <label class="arr-volume" title="When the original MIDI sounds wrong, try remapping voices to the loaded SoundFont">
                 <input id="ptCompatible" type="checkbox"> Compatible
             </label>
@@ -122,9 +123,10 @@
             </aside>
             <main class="player-stage">
                 <div class="player-empty">
-                    <div class="player-empty-icon">🎵</div>
+                    <div class="player-empty-icon material-icon" aria-hidden="true">music_note</div>
                     <p id="ptTrackName">No track selected</p>
                     <button class="btn" data-local-soundfont type="button" title="Choose a SoundFont from your device instead of downloading it">SoundFont…</button>
+                    <progress data-font-progress class="font-progress" aria-label="SoundFont download progress" hidden></progress>
                     <p id="ptAudioState" class="audio-state" role="status">Audio off · press Play</p>
                     <p id="ptStatus" class="muted" aria-live="polite">Choose a track to preview. If voices are missing, try Compatible.</p>
                 </div>
@@ -133,6 +135,16 @@
     </div>
 </div>
 
+<dialog id="soundFontChoice" class="arr-dialog-box" aria-labelledby="soundFontChoiceTitle">
+    <h2 id="soundFontChoiceTitle" class="arr-dialog-title">Choose a SoundFont</h2>
+    <div class="arr-dialog-body">
+        <p>Use the included soundfont.sf2 (~31 MiB) or select an SF2/SF3 file from your device. Local files are not uploaded.</p>
+        <button id="chooseBundledFont" class="btn btn-primary" type="button">Load from this site</button>
+        <label class="arr-field"><span>Local file</span><input id="startupSoundFont" type="file" accept=".sf2,.sf3"></label>
+        <button id="chooseStartupFont" class="btn" type="button" disabled>Use local file</button>
+    </div>
+    <form method="dialog" class="arr-dialog-footer"><button class="btn" value="later">Edit without sound</button></form>
+</dialog>
 <input id="localSoundFont" type="file" hidden accept=".sf2,.sf3">
 <input id="openMidiInput" type="file" hidden accept=".mid,.midi,.rmi,.xmf,.mod,.s3m,.xm,.it">
 <script type="module" src="./js/main.js"></script>
