@@ -111,6 +111,8 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
     const tpb        = () => getSeq()?.ticksPerBar ?? timeDiv() * 4;
     const totalBars = () => Math.max(8, Math.ceil(arrangementDurationTick() / tpb()), Math.ceil(state.loopEndTick / tpb())) + 1;
     let layoutBarWidth = MIN_BAR_W;
+    let viewportWidth = 0;
+    const followAnchor = () => CHAN_W + Math.max(0, viewportWidth - CHAN_W) / 2;
     const barW = () => state.paint?.barWidth ?? layoutBarWidth;
     const tickToX    = (tick) => CHAN_W + (tick / tpb()) * barW();
     const xToTick    = (x)    => Math.max(0, ((x - CHAN_W) / barW()) * tpb());
@@ -185,7 +187,12 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
         loopStartEl.style.display = show ? 'block' : 'none';
         loopEndEl.style.display   = show ? 'block' : 'none';
 
-        content.style.width = `${CHAN_W + bars * bw}px`;
+        const width = CHAN_W + bars * bw;
+        content.style.width = `${width}px`;
+        // A little scrollable space past the end lets the final bars reach the center too.
+        const farthestHead = tickToX(Math.max(playableDurationTick(), loopEnd));
+        const tail = Math.max(0, farthestHead + (viewportWidth - followAnchor()) - width);
+        content.style.setProperty('--arr-follow-tail', `${Math.ceil(tail)}px`);
         content.style.setProperty('--bar-w', bw + 'px');
     };
 
@@ -266,7 +273,7 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
         wireRowEvents();
     };
 
-    const renderPlayhead = () => {
+    const renderPlayhead = (follow = true) => {
         const song = getSeq();
         if (!song) return;
         const seq = loadedSequence === song ? getSequencer?.() : null;
@@ -279,7 +286,14 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
         }
         lastFramePlaying = playing;
         const x = tickToX(state.cursorTick);
-        const scrollLeft = body.scrollLeft;
+        let scrollLeft = body.scrollLeft;
+        if (follow && playing && !loading && !state.dragMode && !state.paint && viewportWidth > CHAN_W) {
+            const anchor = followAnchor();
+            if (x > scrollLeft + anchor || x < scrollLeft + CHAN_W) {
+                body.scrollLeft = Math.max(0, x - anchor);
+                scrollLeft = body.scrollLeft;
+            }
+        }
         playhead.style.transform = `translateX(${x - 1}px)`;
         playhead.style.display = x >= scrollLeft + CHAN_W ? 'block' : 'none';
         ruler.dataset.playheadTick = String(Math.round(state.cursorTick));
@@ -296,7 +310,8 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
         if (!dirty || state.dragClip) return;
         ({ end: durationTick, playable: audibleEnd } = measureArrangement());
         dirty = false;
-        layoutBarWidth = Math.max(MIN_BAR_W, (body.clientWidth - CHAN_W) / totalBars());
+        viewportWidth = body.clientWidth;
+        layoutBarWidth = Math.max(MIN_BAR_W, (viewportWidth - CHAN_W) / totalBars());
         renderRuler();
         renderRows();
     };
@@ -815,7 +830,7 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
     };
 
     const pause = () => {
-        renderPlayhead();
+        renderPlayhead(false);
         clearTimeout(reloadTimer); reloadPending = false;
         if (loading) { playbackRequest++; loading = false; playbackDirty = true; }
         pausedByUser = true;
@@ -823,22 +838,23 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
         updateTransportUI();
     };
 
-    const stop = () => {
+    const stop = (revealStart = false) => {
         playbackRequest++;
         clearTimeout(reloadTimer); reloadPending = false;
         loading = pausedByUser = lastFramePlaying = false;
         state.cursorTick = 0;
+        if (revealStart) body.scrollLeft = 0;
         const seq = getSequencer?.();
-        if (!seq) return;
-        try { seq.pause(); seq.currentTime = 0; } catch {}
+        if (seq) { try { seq.pause(); seq.currentTime = 0; } catch {} }
+        renderPlayhead(false);
         updateTransportUI();
     };
 
     playBtn?.addEventListener('click', () => play());
     $('#arrMixer')?.addEventListener('click', () => onMixer?.());
     pauseBtn?.addEventListener('click', pause);
-    $('#arrStop')?.addEventListener('click', stop);
-    $('#arrHome')?.addEventListener('click', () => seekTick(0, true));
+    $('#arrStop')?.addEventListener('click', () => stop(true));
+    $('#arrHome')?.addEventListener('click', () => { body.scrollLeft = 0; seekTick(0, true); });
     $('#arrEnd')?.addEventListener('click', () => seekTick(playableDurationTick() || arrangementDurationTick(), true));
     loopAllBtn.addEventListener('click', () => {
         if (!playableDurationTick()) return;

@@ -1,5 +1,7 @@
 // js/editor/pianoRoll.js
 import { getInstrumentLabel, mountInstrumentFields } from '../ui/instrumentFields.js';
+import { chooseGeneratedNotes } from '../ui/generateNotesDialog.js';
+import { generatePatternNotes, withoutNoteConflicts } from './noteGenerator.js';
 import { confirmAction } from '../ui/dialogs.js';
 import { instrumentFamily } from './instruments.js';
 import { log } from '../core/log.js';
@@ -58,6 +60,7 @@ export function mountPianoRoll(rootEl, opts = {}) {
                     <input id="prPatternBars" type="number" min="1" max="1024" step="1" aria-label="Pattern length in bars">
                 </label>
                 <button id="prDeletePattern" class="pr-t-btn" type="button" title="Delete pattern and all its clips">Delete pattern</button>
+                <button id="prGenerate" class="pr-t-btn" type="button" title="Generate notes for this pattern"><span class="material-icon" aria-hidden="true">auto_awesome</span> Generate</button>
             </div>
             <div class="pr-toolbar">
 			    <button id="prBackBtn" class="pr-t-btn" type="button" title="Back to Arranger"><span class="material-icon" aria-hidden="true">arrow_back</span> Arranger</button>
@@ -917,6 +920,8 @@ export function mountPianoRoll(rootEl, opts = {}) {
         $('#prPatternField').hidden = !patterns.length;
         $('#prNewPattern').disabled = !channel;
         $('#prDeletePattern').disabled = !pattern;
+        $('#prGenerate').hidden = comment;
+        $('#prGenerate').disabled = !pattern;
         patternSelect.replaceChildren(...patterns.map(p => new Option(p.name, p.id)));
         if (pattern) patternSelect.value = pattern.id;
     };
@@ -949,6 +954,28 @@ export function mountPianoRoll(rootEl, opts = {}) {
         seq.removePattern(pattern.id);
         onPatternSelect?.(state.channel, seq.getChannelPattern(state.channel)?.id);
         refreshHeader(); resetViewport(); onEdit?.();
+    });
+    const generationDefaults = { melodic: {}, drums: {} };
+    $('#prGenerate').addEventListener('click', async () => {
+        const seq = getSeq(), pattern = getPattern(), channel = getChannelInfo();
+        if (!pattern || !channel || isComment()) return;
+        const kind = channel.isDrum ? 'drums' : 'melodic';
+        const choice = await chooseGeneratedNotes({ isDrum: channel.isDrum, hasNotes: pattern.notes.length > 0,
+            defaults: generationDefaults[kind] });
+        if (!choice || getSeq() !== seq || getPattern() !== pattern || getChannelInfo() !== channel) return;
+        generationDefaults[kind] = choice;
+        const notes = generatePatternNotes({ ...choice, isDrum: channel.isDrum,
+            lengthTicks: pattern.lengthTicks, ticksPerBar: seq.ticksPerBar, stepsPerBar: seq.stepsPerBar });
+        if (!notes.length) return;
+        if (choice.replace) pattern.notes = [];
+        const added = withoutNoteConflicts(notes, pattern.notes)
+            .map(note => seq.addNote(pattern.id, { ...note, track: channel.channel }));
+        if (added.length) {
+            resetViewport();
+            state.selection = new Set(added);
+            scheduleHotReload(); onEdit?.();
+        }
+        $('#prEditStatus').textContent = added.length ? `Generated ${added.length} notes in ${pattern.name}` : 'No new notes: the generated notes overlap existing notes.';
     });
     const barsInput = $('#prPatternBars');
     barsInput.addEventListener('keydown', event => {
