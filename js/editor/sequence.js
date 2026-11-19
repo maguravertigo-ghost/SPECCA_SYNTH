@@ -85,6 +85,30 @@ export class Sequence {
         return this.patterns.find(p => p.channel === channel) ?? null;
     }
 
+    get ticksPerBar() { return Math.max(1, Math.round(this.timeDivision * this.stepsPerBar / 4)); }
+
+    resizePattern(id, bars) {
+        const pattern = this.getPattern(id);
+        if (!pattern || !Number.isSafeInteger(bars) || bars < 1 || bars > 1024) throw new Error('Enter a length from 1 to 1024 bars.');
+        const length = bars * this.ticksPerBar;
+        if (length === pattern.lengthTicks) return false;
+        if (pattern.notes.some(note => note.tick + note.dur > length)) {
+            throw new Error('Move or shorten notes beyond the new end first.');
+        }
+        if (length > pattern.lengthTicks) {
+            const ids = new Set(this.patterns.filter(p => p.channel === pattern.channel).map(p => p.id));
+            const lane = this.arrangement.filter(c => ids.has(c.patternId)).sort((a, b) => a.startTick - b.startTick);
+            // Extending a pattern affects all copies. Check each copy against the next clip on its lane.
+            for (let i = 0; i < lane.length - 1; i++) {
+                if (lane[i].patternId === id && lane[i].startTick + length > lane[i + 1].startTick) {
+                    throw new Error('Not enough room: at least one copy would overlap the next clip.');
+                }
+            }
+        }
+        pattern.lengthTicks = length;
+        return true;
+    }
+
     createChannelPattern(channel) {
         const prefix = `${channel + 1}.`;
         const highest = this.patterns.reduce((max, p) => {
@@ -171,9 +195,10 @@ export class Sequence {
     // Плоский список событий в секундах. Сортирован.
     flatten() {
         const events = [];
+        const visual = new Set(this.channels.filter(c => c.kind === 'comment').map(c => c.channel));
         for (const place of this.arrangement) {
             const p = this.getPattern(place.patternId);
-            if (!p) continue;
+            if (!p || visual.has(p.channel)) continue;
             for (const n of p.notes) {
                 const absTick = place.startTick + n.tick;
                 const absStart = this.ticksToSeconds(absTick);

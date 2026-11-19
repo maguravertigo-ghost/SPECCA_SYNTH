@@ -3,6 +3,7 @@ import { log, setStatus } from '../core/log.js';
 import { getSequencer, applyChannelVolume, applyChannelMix, initSynth, bindMasterVolume, loadSong } from '../core/synth.js';
 import { writeArrangementMIDI } from '../editor/exportMidi.js';
 import { getInstrumentCatalog, mountInstrumentFields } from './instrumentFields.js';
+import { confirmAction } from './dialogs.js';
 import { instrumentLabel } from '../editor/instruments.js';
 
 const CHAN_W     = 160;
@@ -99,7 +100,7 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
     const markDirty = () => { dirty = true; };
     const getSeq     = () => (typeof getSequence === 'function' ? getSequence() : null);
     const timeDiv    = () => getSeq()?.timeDivision || 480;
-    const tpb        = () => Math.max(1, Math.round(timeDiv() * (getSeq()?.stepsPerBar || 16) / 4));
+    const tpb        = () => getSeq()?.ticksPerBar ?? timeDiv() * 4;
     const totalBars = () => Math.max(8, Math.ceil(arrangementDurationTick() / tpb()), Math.ceil(state.loopEndTick / tpb())) + 1;
     let layoutBarWidth = MIN_BAR_W;
     const barW = () => state.paint?.barWidth ?? layoutBarWidth;
@@ -113,21 +114,25 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
         return ch?.color || COLORS[idx % COLORS.length];
     };
 
-    let durationTick = 0;
-    const arrangementDurationTick = () => {
-        if (!dirty) return durationTick;
-        const s = getSeq();
-        if (!s?.arrangement?.length) return 0;
-        const lengths = new Map(s.patterns.map(p => [p.id, p.lengthTicks]));
-        let end = 0;
-        for (const pl of s.arrangement) {
-            const length = lengths.get(pl.patternId);
-            if (length !== undefined) end = Math.max(end, pl.startTick + length);
+    let durationTick = 0, audibleEnd = 0;
+    const measureArrangement = () => {
+        const song = getSeq();
+        if (!song?.arrangement.length) return { end: 0, playable: 0 };
+        const patterns = new Map(song.patterns.map(p => [p.id, p]));
+        const comments = new Set(song.channels.filter(c => c.kind === 'comment').map(c => c.channel));
+        let end = 0, playable = 0;
+        for (const clip of song.arrangement) {
+            const pattern = patterns.get(clip.patternId);
+            if (!pattern) continue;
+            const stop = clip.startTick + pattern.lengthTicks;
+            end = Math.max(end, stop);
+            if (!comments.has(pattern.channel) && pattern.notes.length) playable = Math.max(playable, stop);
         }
-        return end;
+        return { end, playable };
     };
-
-    const effectiveLoopEnd = () => state.loopEndTick ?? arrangementDurationTick();
+    const arrangementDurationTick = () => dirty ? measureArrangement().end : durationTick;
+    const playableDurationTick = () => dirty ? measureArrangement().playable : audibleEnd;
+    const effectiveLoopEnd = () => state.loopEndTick ?? playableDurationTick();
     const hasLoop = () => state.loopEnabled && effectiveLoopEnd() > state.loopStartTick;
     const updateLoopButton = () => {
         loopBtn.classList.toggle('active', hasLoop());
@@ -141,7 +146,8 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
             reloadTimer = setTimeout(() => play(true), 100);
         } else if (loading) reloadPending = true;
     };
-    const edit = () => { onEdit?.(); updatePlayback(); markDirty(); };
+    const edit = (audible = true) => { onEdit?.(); if (audible) updatePlayback(); markDirty(); };
+    const isCommentChannel = channel => getSeq()?.channels.find(c => c.channel === channel)?.kind === 'comment';
 
     // ==================================================================
     // Render
@@ -173,6 +179,13 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
         content.style.width = `${CHAN_W + bars * bw}px`;
         content.style.setProperty('--bar-w', bw + 'px');
     };
+
+    const focusPattern = (channel, id) => {
+        onSelectPattern?.(channel, id);
+        const header = rows.querySelector(`.arr-chan[data-channel="${channel}"]`);
+        if (header) header.title = channelTooltip(channel);
+    };
+    const channelTooltip = channel => `Ch ${channel + 1} · Draw: ${getChannelPattern?.(channel)?.name ?? 'New pattern'} · Right-click for options`;
 
     const renderRows = () => {
         const s = getSeq();
@@ -208,14 +221,15 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
             const i = ch.channel;
             const color = chanColor(i);
             const muted = !!ch.muted;
-            html += `<div class="arr-row" data-channel="${i}">`;
-            html += `  <div class="arr-chan" data-channel="${i}" style="width:${CHAN_W}px" role="button" tabindex="0" title="Ch ${i + 1} · Edit notes in Piano Roll">`;
-            html += `    <span class="arr-dot" data-channel="${i}"
+            const comment = ch.kind === 'comment';
+            html += `<div class="arr-row${comment ? ' arr-comment-row' : ''}" data-channel="${i}">`;
+            html += `  <div class="arr-chan" data-channel="${i}" style="width:${CHAN_W}px" role="button" tabindex="0" title="${escapeHtml(channelTooltip(i))}">`;
+            if (!comment) html += `    <span class="arr-dot" data-channel="${i}"
                             style="background:${muted ? 'transparent' : '#1a7f37'};
                                    border-color:${muted ? '#666' : '#1a7f37'};"></span>`;
             html += `    <div class="arr-chan-info">`;
             html += `      <div class="arr-chan-name">${escapeHtml(ch.name || ('Ch ' + (i + 1)))}</div>`;
-            html += `      <div class="arr-chan-pat">${escapeHtml(instrumentLabel(ch, catalog))}</div>`;
+            html += `      <div class="arr-chan-pat">${escapeHtml(comment ? 'Comment' : instrumentLabel(ch, catalog))}</div>`;
             html += `    </div>`;
             html += `    <span class="arr-chan-bar" style="background:${color}"></span>`;
             html += `  </div>`;
@@ -225,10 +239,13 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
                 const left = tickToX(pl.startTick) - CHAN_W;
                 const right = tickToX(pl.startTick + pat.lengthTicks) - CHAN_W;
                 const w = Math.max(8, right - left);
-                html += `<div class="arr-clip${selected}" data-placement="${escapeHtml(pl.id)}"
+                const text = pat.comment?.trim() || '';
+                const label = comment && text ? `${pat.name} · ${text.replace(/\s+/g, ' ')}` : pat.name;
+                const hint = comment ? `${pat.name} · ${text || 'Notes'}` : `${pat.name} · ${pat.notes.length} notes`;
+                html += `<div class="arr-clip${selected}${comment ? ' arr-comment-clip' : ''}" data-placement="${escapeHtml(pl.id)}"
                               data-channel="${i}"
                               style="left:${left}px;width:${w}px;background:${color}"
-                              title="${escapeHtml(pat.name)} · ${pat.notes.length} notes">${patternPreview(pat)}<span>${escapeHtml(pat.name)}</span></div>`;
+                              title="${escapeHtml(hint)}">${comment ? '' : patternPreview(pat)}<span>${escapeHtml(label)}</span></div>`;
             }
             html += `  </div>`;
             html += `</div>`;
@@ -244,7 +261,7 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
         if (!song) return;
         const seq = loadedSequence === song ? getSequencer?.() : null;
         const playing = !!seq && !seq.paused && !seq.isFinished;
-        const end = Math.max(arrangementDurationTick(), seq ? song.secondsToTicks(seq.duration) : 0);
+        const end = Math.max(playableDurationTick(), seq ? song.secondsToTicks(seq.duration) : 0);
         if (playing && !loading && state.dragMode !== 'seek' && performance.now() >= seekingUntil) {
             state.cursorTick = Math.max(0, Math.min(end, song.secondsToTicks(seq.currentTime)));
         } else if (lastFramePlaying && seq?.isFinished && !loading) {
@@ -267,7 +284,7 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
 
     const render = () => {
         if (!dirty || state.dragClip) return;
-        durationTick = arrangementDurationTick();
+        ({ end: durationTick, playable: audibleEnd } = measureArrangement());
         dirty = false;
         layoutBarWidth = Math.max(MIN_BAR_W, (body.clientWidth - CHAN_W) / totalBars());
         renderRuler();
@@ -316,7 +333,7 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
                 const target = s.channels.find(c => c.channel === ch);
                 const targetState = !!target?.muted;
                 s.channels.forEach(c => {
-                    if (c.created === false) return;
+                    if (c.created === false || c.kind === 'comment') return;
                     c.muted = targetState;    // копируем состояние этой точки на все
                     applyChannel(c.channel);
                 });
@@ -386,7 +403,7 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
             const placement = s.arrangement.find(p => p.id === clip.dataset.placement);
             if (!placement) return;
             state.selectedPlacement = placement.id;
-            onSelectPattern?.(channel, placement.patternId);
+            focusPattern(channel, placement.patternId);
             rows.querySelector('.arr-clip.selected')?.classList.remove('selected');
             clip.classList.add('selected');
             state.dragMode = 'move-clip';
@@ -408,7 +425,7 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
     const applyChannel = (ch) => {
         const s = getSeq();
         const info = s?.channels?.find(c => c.channel === ch);
-        if (!info) return;
+        if (!info || info.kind === 'comment') return;
         if (loadedSequence === s) applyChannelVolume(info);
     };
 
@@ -433,6 +450,7 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
         if (!s) return;
         const existing = s.channels.find(c => c.channel === slot);
         const isExisting = !isNew && existing;
+        const wasAudible = existing?.kind !== 'comment';
 
         const overlay = document.createElement('div');
         overlay.className = 'arr-dialog-overlay';
@@ -451,7 +469,7 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
                             ${COLORS.map((c, idx) => `<span class="arr-color ${existing?.color === c ? 'active' : ''}" data-color="${c}" style="background:${c}"></span>`).join('')}
                         </div>
                     </label>
-                    <label class="arr-field">
+                    <label class="arr-field" id="dlgVolField">
                         <span>Volume</span>
                         <input id="dlgVol" type="range" min="0" max="100" value="${existing?.volume ?? 100}" style="flex:1">
                         <span id="dlgVolVal" class="arr-num">${existing?.volume ?? 100}</span>
@@ -465,7 +483,9 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
         `;
         document.body.appendChild(overlay);
 
-        const readInstrument = mountInstrumentFields(overlay.querySelector('#dlgInstrument'), existing ?? { isDrum: slot === 9 });
+        const readInstrument = mountInstrumentFields(overlay.querySelector('#dlgInstrument'), existing ?? { isDrum: slot === 9 }, { allowComment: true });
+        const updateCategory = () => { overlay.querySelector('#dlgVolField').hidden = readInstrument.category.value === 'comment'; };
+        readInstrument.category.addEventListener('change', updateCategory); updateCategory();
         let chosenColor = existing?.color || COLORS[slot % COLORS.length];
         overlay.querySelectorAll('.arr-color').forEach(el => {
             el.addEventListener('click', () => {
@@ -499,9 +519,9 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
             chObj.muted = chObj.muted ?? false;
             chObj.created = true;
 
-            if (loadedSequence === s) applyChannelVolume(chObj);
+            if (loadedSequence === s) applyChannelVolume(inst.kind === 'comment' ? { ...chObj, muted: true } : chObj);
             overlay.remove();
-            edit();
+            edit(inst.kind !== 'comment' || (isExisting && wasAudible));
         });
     };
 
@@ -511,45 +531,65 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
         const info = s.channels.find(c => c.channel === ch);
         if (!info) return;
 
-        const overlay = document.createElement('div');
-        overlay.className = 'arr-dialog-overlay';
-        overlay.innerHTML = `
-            <div class="arr-dialog-box arr-context-menu">
-                <div class="arr-dialog-title">${escapeHtml(info.name || ('Ch ' + (ch + 1)))}</div>
-                <button class="arr-menu-item" data-act="edit">Edit channel…</button>
-                <button class="arr-menu-item" data-act="up">Move up</button>
-                <button class="arr-menu-item" data-act="down">Move down</button>
-                <div class="arr-menu-sep"></div>
-                <button class="arr-menu-item danger" data-act="delete">Delete channel</button>
-                <button class="arr-menu-item" data-act="cancel">Cancel</button>
-            </div>
-        `;
-        document.body.appendChild(overlay);
-        overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
-
-        overlay.querySelectorAll('.arr-menu-item').forEach(btn => {
-            btn.addEventListener('click', () => {
+        const dialog = document.createElement('dialog');
+        dialog.className = 'arr-dialog-box arr-context-menu app-dialog';
+        const name = info.name || `Ch ${ch + 1}`;
+        dialog.setAttribute('aria-label', name);
+        dialog.innerHTML = `
+            <h2 class="arr-dialog-title"></h2>
+            <button type="button" class="arr-menu-item arr-pattern-focus" data-act="pattern" aria-expanded="false"></button>
+            <div class="arr-pattern-options" hidden></div>
+            <div class="arr-menu-sep"></div>
+            <button type="button" class="arr-menu-item" data-act="edit">Edit channel…</button>
+            <button type="button" class="arr-menu-item" data-act="up">Move up</button>
+            <button type="button" class="arr-menu-item" data-act="down">Move down</button>
+            <div class="arr-menu-sep"></div>
+            <button type="button" class="arr-menu-item danger" data-act="delete">Delete channel</button>
+            <button type="button" class="arr-menu-item" data-act="cancel">Cancel</button>`;
+        dialog.querySelector('h2').textContent = name;
+        const focus = dialog.querySelector('[data-act="pattern"]');
+        const active = getChannelPattern?.(ch);
+        focus.textContent = `Draw pattern: ${active?.name ?? 'New pattern'} ▾`;
+        const options = dialog.querySelector('.arr-pattern-options');
+        for (const pattern of s.patterns.filter(p => p.channel === ch)) {
+            const option = document.createElement('button');
+            option.type = 'button'; option.className = 'arr-menu-item'; option.textContent = pattern.name;
+            option.setAttribute('aria-pressed', String(pattern.id === active?.id));
+            option.addEventListener('click', () => {
+                focusPattern(ch, pattern.id);
+                state.selectedPlacement = null;
+                markDirty(); dialog.close();
+            });
+            options.append(option);
+        }
+        if (!options.childElementCount) options.textContent = 'No patterns yet. Draw or open the channel to create one.';
+        dialog.addEventListener('close', () => dialog.remove(), { once: true });
+        document.body.append(dialog); dialog.showModal();
+        dialog.querySelectorAll('[data-act]').forEach(btn => {
+            btn.addEventListener('click', async () => {
                 const act = btn.dataset.act;
-                overlay.remove();
+                if (act === 'pattern') {
+                    options.hidden = !options.hidden;
+                    focus.setAttribute('aria-expanded', String(!options.hidden));
+                    if (!options.hidden) options.querySelector('[aria-pressed="true"],button')?.focus();
+                    return;
+                }
+                dialog.close();
                 if (act === 'edit') {
                     openChannelDialog({ slot: ch, isNew: false });
                 } else if (act === 'delete') {
-                    if (!confirm(`Delete "${info.name}"?`)) return;
-                    // Remove channel from list
+                    if (!await confirmAction('Delete channel', `Delete ${name} and all its patterns and clips?`) || getSeq() !== s) return;
                     s.channels = s.channels.filter(c => c.channel !== ch);
-                    // Remove all patterns on this channel
                     s.patterns = s.patterns.filter(p => p.channel !== ch);
-                    // Remove all placements of those patterns
                     const alivePatIds = new Set(s.patterns.map(p => p.id));
                     s.arrangement = s.arrangement.filter(pl => alivePatIds.has(pl.patternId));
-                    edit();
+                    edit(info.kind !== 'comment');
                 } else if (act === 'up' || act === 'down') {
-                    const channels = s.channels.filter(c => c.created !== false);
-                    const sorted = [...channels].sort((a, b) => a.channel - b.channel);
+                    const sorted = s.channels.filter(c => c.created !== false).sort((a, b) => a.channel - b.channel);
                     const idx = sorted.findIndex(c => c.channel === ch);
-                    const swapIdx = act === 'up' ? idx - 1 : idx + 1;
-                    if (swapIdx < 0 || swapIdx >= sorted.length) return;
-                    s.swapChannels(sorted[idx].channel, sorted[swapIdx].channel);
+                    const other = sorted[idx + (act === 'up' ? -1 : 1)];
+                    if (!other) return;
+                    s.swapChannels(ch, other.channel);
                     edit();
                 }
             });
@@ -596,8 +636,9 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
         }
         if (state.paint?.pointerId === e.pointerId) {
             const changed = state.paint.changed;
+            const audible = !isCommentChannel(state.paint.channel);
             state.paint = null;
-            if (changed) edit();
+            if (changed) edit(audible);
             else markDirty();
         }
         const d = state.dragClip;
@@ -606,7 +647,7 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
             const pattern = d.sequence.getPattern(d.placement.patternId);
             if (e.type !== 'pointercancel' && d.moved && pattern && d.sequence === getSeq() &&
                 !clipsAt(d.channel, d.nextTick, pattern.lengthTicks, d.placement)) {
-                if (d.placement.startTick !== d.nextTick) { d.placement.startTick = d.nextTick; edit(); }
+                if (d.placement.startTick !== d.nextTick) { d.placement.startTick = d.nextTick; edit(!isCommentChannel(d.channel)); }
             }
             d.el.classList.remove('dragging');
             if (d.moved) markDirty();
@@ -683,14 +724,14 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
         const loaded = !!seq && loadedSequence === getSeq() && !seq.isFinished;
         playBtn.classList.toggle('active', loaded && !seq.paused);
         pauseBtn.classList.toggle('active', loaded && pausedByUser && seq.paused);
-        playBtn.disabled = loading || !getSeq()?.arrangement.length || (loaded && !seq.paused);
+        playBtn.disabled = loading || !playableDurationTick() || (loaded && !seq.paused);
         pauseBtn.disabled = !loaded || seq.paused;
     };
 
     const play = async (reload = false) => {
         const s = getSeq();
         if (rootEl.inert) return;
-        if (!s?.arrangement.length) { if (reload === true) stop(); return; }
+        if (!playableDurationTick()) { if (reload === true) stop(); return; }
         if (loading) { if (reload === true) reloadPending = true; return; }
         const request = ++playbackRequest;
         loading = true;
@@ -758,7 +799,7 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
     pauseBtn?.addEventListener('click', pause);
     $('#arrStop')?.addEventListener('click', stop);
     $('#arrHome')?.addEventListener('click', () => seekTick(0, true));
-    $('#arrEnd')?.addEventListener('click', () => seekTick(arrangementDurationTick(), true));
+    $('#arrEnd')?.addEventListener('click', () => seekTick(playableDurationTick() || arrangementDurationTick(), true));
     loopBtn?.addEventListener('click', () => {
         state.loopEnabled = !state.loopEnabled;
         if (state.loopEnabled && state.loopStartTick === effectiveLoopEnd()) {

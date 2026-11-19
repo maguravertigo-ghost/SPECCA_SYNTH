@@ -1,5 +1,6 @@
 // js/editor/pianoRoll.js
 import { getInstrumentLabel, mountInstrumentFields } from '../ui/instrumentFields.js';
+import { confirmAction } from '../ui/dialogs.js';
 import { instrumentFamily } from './instruments.js';
 import { log } from '../core/log.js';
 import { copyNotes, planPaste } from './noteClipboard.js';
@@ -53,6 +54,9 @@ export function mountPianoRoll(rootEl, opts = {}) {
                 <label id="prPatternField" class="pr-num" hidden><span>Pattern</span> <select id="prPatternSelect"></select></label>
                 <button id="prInstrumentBtn" class="pr-t-btn" type="button">Instrument…</button>
                 <button id="prNewPattern" class="pr-t-btn" type="button">New pattern</button>
+                <label id="prBarsField" class="pr-num" title="Length of this pattern and all its clips"><span>Bars</span>
+                    <input id="prPatternBars" type="number" min="1" max="1024" step="1" aria-label="Pattern length in bars">
+                </label>
                 <button id="prDeletePattern" class="pr-t-btn" type="button" title="Delete pattern and all its clips">Delete pattern</button>
             </div>
             <div class="pr-toolbar">
@@ -79,6 +83,11 @@ export function mountPianoRoll(rootEl, opts = {}) {
                 <span class="pr-sep"></span>
                 <button id="prClearBtn" class="btn btn-ghost" type="button" title="Clear current pattern"><span class="material-icon" aria-hidden="true">delete</span> Clear</button>
             </div>
+            <section id="prCommentPane" class="pr-comment" hidden>
+                <label for="prCommentText">Notes</label>
+                <textarea id="prCommentText" rows="6" maxlength="4000" placeholder="Write a cue for this section…"></textarea>
+                <p>Shown on the pattern’s clips in the arrangement. Not played or exported to MIDI.</p>
+            </section>
             <div class="pr-canvas-wrap"><canvas id="prCanvas" tabindex="0" aria-label="Piano roll. Click its ruler to position playback or paste."></canvas></div>
             <div id="prEditStatus" class="pr-edit-status" role="status">Ctrl/Cmd+C, X, V · Click the ruler to position playback or paste</div>
             <div class="pr-scrollbar hidden" id="prScrollBar">
@@ -133,6 +142,7 @@ export function mountPianoRoll(rootEl, opts = {}) {
     const getSeq = () => getSequence?.();
     const getChannel = () => state.channel;
     const getChannelInfo = () => getSeq()?.channels.find(c => c.channel === getChannel());
+    const isComment = () => getChannelInfo()?.kind === 'comment';
     const getPattern = () => getChannelPattern?.(getChannel()) ?? null;
     const getTimeDiv = () => getSeq()?.timeDivision || 480;
     const snapQuantum = (altKey = false) => {
@@ -519,7 +529,7 @@ export function mountPianoRoll(rootEl, opts = {}) {
     const pushToSequencer = async (keepPlaying = false) => {
         const seq = getSeq();
         const pattern = getPattern();
-        if (!seq || !pattern?.notes.length || !state.visible || rootEl.inert || state.loading) return;
+        if (isComment() || !seq || !pattern?.notes.length || !state.visible || rootEl.inert || state.loading) return;
         const request = ++playbackRequest;
         state.loading = playBtn.disabled = true;
         try {
@@ -892,7 +902,17 @@ export function mountPianoRoll(rootEl, opts = {}) {
         $('#prChannelName').textContent = channel ? channel.name || `Ch ${channel.channel + 1}` : 'Piano Roll';
         instrumentBtn.textContent = channel ? `Instrument: ${getInstrumentLabel(channel)}` : 'Instrument…';
         instrumentBtn.title = channel ? instrumentFamily(channel) : '';
+        const comment = isComment();
+        instrumentBtn.hidden = comment;
         instrumentBtn.disabled = !channel;
+        rootEl.querySelector('.pr-shell').classList.toggle('is-comment', comment);
+        $('#prCommentPane').hidden = !comment;
+        wrap.hidden = comment;
+        const notes = $('#prCommentText');
+        notes.disabled = !pattern;
+        if (notes.value !== (pattern?.comment ?? '')) notes.value = pattern?.comment ?? '';
+        $('#prBarsField').hidden = !pattern;
+        $('#prPatternBars').value = pattern ? String(Math.ceil(pattern.lengthTicks / getSeq().ticksPerBar)) : '';
         const patterns = getSeq()?.patterns.filter(p => p.channel === state.channel) ?? [];
         $('#prPatternField').hidden = !patterns.length;
         $('#prNewPattern').disabled = !channel;
@@ -922,14 +942,38 @@ export function mountPianoRoll(rootEl, opts = {}) {
         onPatternSelect?.(state.channel, pattern.id);
         refreshHeader(); resetViewport(); onEdit?.();
     });
-    $('#prDeletePattern').addEventListener('click', () => {
+    $('#prDeletePattern').addEventListener('click', async () => {
         const seq = getSeq(), pattern = getPattern();
-        if (!pattern || !confirm(`Delete ${pattern.name} and all its clips?`)) return;
+        if (!pattern || !await confirmAction('Delete pattern', `Delete ${pattern.name} and all its clips?`) || getSeq() !== seq || getPattern() !== pattern) return;
         stop();
         seq.removePattern(pattern.id);
         onPatternSelect?.(state.channel, seq.getChannelPattern(state.channel)?.id);
         refreshHeader(); resetViewport(); onEdit?.();
     });
+    const barsInput = $('#prPatternBars');
+    barsInput.addEventListener('keydown', event => {
+        if (event.key === 'Enter') { event.preventDefault(); barsInput.blur(); }
+    });
+    barsInput.addEventListener('change', () => {
+        const seq = getSeq(), pattern = getPattern();
+        if (!pattern) return;
+        const status = $('#prEditStatus');
+        try {
+            if (!seq.resizePattern(pattern.id, barsInput.valueAsNumber)) return;
+            const position = Math.min(state.cursorTick, loopTicks());
+            state.cursorTick = position;
+            updateScrollbar(); scheduleHotReload(); onEdit?.();
+            status.textContent = `${pattern.name} · ${barsInput.value} bar(s)`;
+        } catch (error) {
+            barsInput.value = String(Math.ceil(pattern.lengthTicks / seq.ticksPerBar));
+            status.textContent = error.message;
+        }
+    });
+    $('#prCommentText').addEventListener('input', event => {
+        const pattern = getPattern();
+        if (pattern && isComment()) pattern.comment = event.target.value;
+    });
+    $('#prCommentText').addEventListener('change', () => onEdit?.());
     patternSelect.addEventListener('change', () => {
         stop();
         onPatternSelect?.(state.channel, patternSelect.value);
@@ -1032,7 +1076,7 @@ export function mountPianoRoll(rootEl, opts = {}) {
 
     // Menu actions and keyboard shortcuts share the same note clipboard.
     const editNotes = (action) => {
-        if (!state.visible || rootEl.inert || pickerEl?.open) return false;
+        if (isComment() || !state.visible || rootEl.inert || pickerEl?.open) return false;
         const p = getPattern();
         if (!p) return false;
         const message = (text) => { $('#prEditStatus').textContent = text; };
@@ -1079,7 +1123,7 @@ export function mountPianoRoll(rootEl, opts = {}) {
     const shortcuts = { KeyA: 'all', KeyC: 'copy', KeyX: 'cut', KeyV: 'paste' };
     document.addEventListener('keydown', (e) => {
         const active = document.activeElement;
-        if (!state.visible || rootEl.inert || pickerEl?.open || document.querySelector('dialog[open], .pr-picker-overlay:not(.hidden), .arr-dialog-overlay') ||
+        if (isComment() || !state.visible || rootEl.inert || pickerEl?.open || document.querySelector('dialog[open], .pr-picker-overlay:not(.hidden), .arr-dialog-overlay') ||
             active?.closest('input, textarea, select, [contenteditable="true"]')) return;
         const action = (e.ctrlKey || e.metaKey) && !e.altKey
             ? shortcuts[e.code] ?? shortcuts[`Key${e.key.toUpperCase()}`]

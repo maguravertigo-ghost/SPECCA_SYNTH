@@ -29,15 +29,14 @@ function buildPatterns(sequence, channel, notes, barTicks) {
 export function importMidi(buffer, name = '') {
     const midi = BasicMIDI.fromArrayBuffer(buffer, name);
     const seq = new Sequence({ name: name || midi.fileName || 'Imported', timeDivision: midi.timeDivision || 480 });
-    const division = seq.timeDivision;
     // BasicMIDI lists tempo changes in reverse; the default 120 BPM precedes tick-zero events.
     const tempos = Array.from(new Map([...midi.tempoChanges].reverse().map(t => [t.ticks, t.tempo])));
     seq.tempo = tempos[0]?.[1] ?? 120;
     seq.tempoChanges = tempos.filter(([tick]) => tick > 0).map(([tick, tempo]) => ({ tick, tempo }));
     const meter = midi.tracks.flatMap(t => t.events.filter(e => e.statusByte === 0x58 && e.ticks === 0))[0];
     if (meter) seq.stepsPerBar = Math.max(1, Math.round(meter.data[0] * 16 / (2 ** meter.data[1])));
-    const barTicks = Math.max(1, Math.round(division * seq.stepsPerBar / 4));
-    seq.patternLengthTicks = barTicks * 4;
+    const barTicks = seq.ticksPerBar;
+    seq.patternLengthTicks = barTicks;
     seq.channels = Array.from({ length: 16 }, (_, channel) => ({
         channel, program: 0, isDrum: channel === 9, volume: 100, pan: 64, created: false,
     }));

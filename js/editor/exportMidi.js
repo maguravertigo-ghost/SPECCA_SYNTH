@@ -18,6 +18,7 @@ function writeSequence(sequence, clips, { loop = null, respectMute = false, live
     const meta = [];
     const ports = new Map();
     const active = new Set();
+    const visual = new Set(sequence.channels.filter(c => c.kind === 'comment').map(c => c.channel));
     let endTick = 0;
     const emit = (tick, order, data, port = null) => {
         let events = meta;
@@ -29,6 +30,7 @@ function writeSequence(sequence, clips, { loop = null, respectMute = false, live
     };
 
     for (const { pattern, startTick, trim } of clips) {
+        if (visual.has(pattern.channel)) continue;
         endTick = Math.max(endTick, startTick + pattern.lengthTicks);
         for (const note of pattern.notes) {
             const lane = note.track;

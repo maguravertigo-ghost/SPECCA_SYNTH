@@ -8,6 +8,7 @@ import { mountPianoRoll } from './editor/pianoRoll.js';
 import { importMidi } from './editor/importMidi.js';
 import { adaptToSoundfont } from './editor/instruments.js';
 import { writeArrangementMIDI } from './editor/exportMidi.js';
+import { askName } from './ui/dialogs.js';
 import { openMixer } from './ui/mixer.js';
 import { createEditHistory } from './editor/history.js';
 import { Sequence } from './editor/sequence.js';
@@ -15,6 +16,10 @@ import { openProjectSettings } from './ui/projectSettings.js';
 import { mountArranger } from './ui/arrangerView.js';
 
 wireGlobalErrorHandlers();
+// Keep the OS context menu out of the studio, but preserve it for real text editing.
+document.addEventListener('contextmenu', event => {
+    if (!event.target.closest?.('input[type="text"], input[type="number"], textarea, [contenteditable="true"]')) event.preventDefault();
+});
 // ---------------- Log toggle / copy ----------------
 const logPanel     = document.getElementById('logPanel');
 const toggleLogBtn = document.getElementById('toggleLogBtn');
@@ -58,7 +63,7 @@ function restoreEdit(action) {
     refreshAll(); syncHistory();
 }
 const showProjectMixer = () => openMixer({ title: 'Project mixer',
-    channels: currentSequence.channels.filter(c => c.created !== false).sort((a,b) => a.channel - b.channel),
+    channels: currentSequence.channels.filter(c => c.created !== false && c.kind !== 'comment').sort((a,b) => a.channel - b.channel),
     onChange: channel => { applyChannelVolume(channel); arrangerView?.refresh(); }, onCommit: commitEdit,
 });
 const selectedPatterns = new Map();
@@ -253,17 +258,18 @@ const readProjects = () => {
 };
 const writeProjects = (obj) => localStorage.setItem(STORAGE_KEY, JSON.stringify(obj));
 
-const saveProjectToLocal = () => {
+const saveProjectToLocal = async () => {
     const seq = currentSequence;
     if (!seq) { log('Save: nothing to save', 'warn'); return; }
-    const name = prompt('Project name:', lastLoadedName || seq.name);
-    if (!name) return;
+    const name = await askName('Save project', 'Name', lastLoadedName || seq.name);
+    if (!name || currentSequence !== seq) return;
     const projects = readProjects();
     const entry = {
         seq: JSON.parse(seq.toJSON()),
         timestamp: Date.now(),
     };
-    writeProjects({ ...projects, [name]: entry });
+    try { writeProjects({ ...projects, [name]: entry }); }
+    catch (error) { log(`Save failed: ${error}`, 'error'); setStatus('Could not save project'); return; }
     log(`main: project saved "${name}"`);
     setStatus(`Saved: ${name}`);
 };
@@ -319,7 +325,7 @@ menubar = mountMenubar({
                 seq.name = name;
                 seq.tempo = bpm;
                 seq.stepsPerBar = steps;
-                seq.patternLengthTicks = Math.round(seq.timeDivision / 4) * steps * bars;
+                seq.patternLengthTicks = seq.ticksPerBar * bars;
                 useSequence(seq);
                 setStatus(`New project: ${name}`);
                 log(`main: new project "${name}" ${bpm}BPM ${bars}bars × ${steps}steps`);
@@ -380,7 +386,7 @@ menubar = mountMenubar({
             initial: {
                 name:  seq?.name  || 'Untitled',
                 bpm:   Math.round(seq?.tempo || 120),
-                bars: Math.max(1, Math.round(seq.patternLengthTicks / (Math.round(seq.timeDivision / 4) * seq.stepsPerBar))),
+                bars: Math.max(1, Math.round(seq.patternLengthTicks / seq.ticksPerBar)),
                 steps: seq.stepsPerBar,
             },
             onApply: ({ name, bpm, bars, steps }) => {
@@ -388,7 +394,7 @@ menubar = mountMenubar({
                 seq.name  = name;
                 seq.tempo = bpm;
                 seq.stepsPerBar = steps;
-                seq.patternLengthTicks = Math.round(seq.timeDivision / 4) * steps * bars;
+                seq.patternLengthTicks = seq.ticksPerBar * bars;
                 refreshAll();
                 commitEdit();
                 setStatus(`Settings updated: ${bpm}BPM ${bars}×${steps}`);
