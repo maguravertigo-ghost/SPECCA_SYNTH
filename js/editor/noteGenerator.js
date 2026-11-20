@@ -1,11 +1,14 @@
 export const TONICS = ['C', 'C♯', 'D', 'E♭', 'E', 'F', 'F♯', 'G', 'A♭', 'A', 'B♭', 'B'];
 
 const HARMONY = {
+    dorian: { scale: [0, 2, 3, 5, 7, 9, 10] },
+    mixolydian: { scale: [0, 2, 4, 5, 7, 9, 10] },
     major: { scale: [0, 2, 4, 5, 7, 9, 11], progressions: [[0, 4, 5, 3], [0, 5, 1, 4], [0, 3, 5, 4], [0, 1, 3, 4]] },
     minor: { scale: [0, 2, 3, 5, 7, 8, 10], progressions: [[0, 5, 2, 6], [0, 3, 5, 4], [0, 6, 5, 6], [0, 3, 6, 0]] },
 };
 
 // Diatonic chords are shared by the song generator and the Piano Roll.
+export const scaleIntervals = mode => [...(HARMONY[mode] ?? HARMONY.major).scale];
 export const scaleTone = (tonic, mode, degree, base = 60) => {
     const scale = (HARMONY[mode] ?? HARMONY.major).scale;
     return base + ((Math.round(tonic) % 12 + 12) % 12) + scale[((degree % 7) + 7) % 7] + 12 * Math.floor(degree / 7);

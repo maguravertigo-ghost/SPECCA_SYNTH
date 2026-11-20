@@ -1,3 +1,4 @@
+import { choosePitchFix } from '../ui/fixNotesDialog.js';
 // js/editor/pianoRoll.js
 import { getInstrumentLabel, mountInstrumentFields } from '../ui/instrumentFields.js';
 import { chooseGeneratedNotes } from '../ui/generateNotesDialog.js';
@@ -61,6 +62,7 @@ export function mountPianoRoll(rootEl, opts = {}) {
                 </label>
                 <button id="prDeletePattern" class="pr-t-btn" type="button" title="Delete pattern and all its clips">Delete pattern</button>
                 <button id="prGenerate" class="pr-t-btn" type="button" title="Generate notes for this pattern"><span class="material-icon" aria-hidden="true">auto_awesome</span> Generate</button>
+                <button id="prFixNotes" class="pr-t-btn" type="button" title="Correct out-of-scale pitches">FIX</button>
             </div>
             <div class="pr-toolbar">
 			    <button id="prBackBtn" class="pr-t-btn" type="button" title="Back to Arranger"><span class="material-icon" aria-hidden="true">arrow_back</span> Arranger</button>
@@ -934,6 +936,8 @@ export function mountPianoRoll(rootEl, opts = {}) {
         $('#prDeletePattern').disabled = !pattern;
         $('#prGenerate').hidden = comment;
         $('#prGenerate').disabled = !pattern;
+        $('#prFixNotes').hidden = comment || !!channel?.isDrum;
+        $('#prFixNotes').disabled = !pattern;
         patternSelect.replaceChildren(...patterns.map(p => new Option(p.name, p.id)));
         if (pattern) patternSelect.value = pattern.id;
     };
@@ -988,6 +992,22 @@ export function mountPianoRoll(rootEl, opts = {}) {
             scheduleHotReload(); onEdit?.();
         }
         $('#prEditStatus').textContent = added.length ? `Generated ${added.length} notes in ${pattern.name}` : 'No new notes: the generated notes overlap existing notes.';
+    });
+    $('#prFixNotes').addEventListener('click', async () => {
+        const seq = getSeq(), pattern = getPattern(), channel = getChannelInfo();
+        if (!pattern?.notes.length || !channel || channel.isDrum || isComment()) {
+            $('#prEditStatus').textContent = 'No melodic notes to fix.';
+            return;
+        }
+        const notes = pattern.notes.filter(n => n.track === channel.channel);
+        const selected = new Set(notes.filter(n => state.selection.has(n)));
+        const result = await choosePitchFix({ notes, selected, beat: seq.timeDivision });
+        if (!result || !result.changes.size || getSeq() !== seq || getPattern() !== pattern) return;
+        for (const [note, pitch] of result.changes) note.key = pitch;
+        state.selection = new Set(result.changes.keys());
+        dirty = true;
+        scheduleHotReload(); onEdit?.();
+        $('#prEditStatus').textContent = `Fixed ${result.changes.size} note pitch(es) · Undo to restore`;
     });
     const barsInput = $('#prPatternBars');
     barsInput.addEventListener('keydown', event => {

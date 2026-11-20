@@ -70,3 +70,22 @@ test('moving a channel row keeps its notes, placements and instrument tied toget
     assert.equal(placement.patternId, pattern.id);
     assert.equal(sequence.channels.find(c => c.channel === 8).program, 33);
 });
+
+test('clone inserts below source without moving MIDI lanes and deep copies shared patterns and clips', () => {
+    const seq = new Sequence({ channels: [{ channel: 0, name: 'Lead', program: 2 }, { channel: 7, name: 'Bass' }] });
+    const p = seq.createChannelPattern(0);
+    seq.addNote(p.id, { track: 0, key: 63, tick: 10, dur: 30 });
+    seq.placePattern(p.id, 0);
+    seq.placePattern(p.id, p.lengthTicks);
+    const clone = seq.cloneChannel(0);
+    assert.deepEqual(seq.orderedChannels().map(c => c.channel), [0, clone.channel, 7]);
+    assert.equal(clone.program, 2);
+    const copy = seq.getChannelPattern(clone.channel);
+    assert.notEqual(copy.id, p.id);
+    assert.notEqual(copy.notes[0].id, p.notes[0].id);
+    assert.equal(copy.notes[0].track, clone.channel);
+    assert.deepEqual(seq.arrangement.filter(c => c.patternId === copy.id).map(c => c.startTick), [0, p.lengthTicks]);
+    copy.notes[0].key = 80;
+    assert.equal(p.notes[0].key, 63);
+    assert.deepEqual(Sequence.fromJSON(seq.toJSON()).orderedChannels().map(c => c.name), ['Lead', 'Lead (copy)', 'Bass']);
+});

@@ -44,7 +44,6 @@ const playlist = new Playlist();
 // ---------------- Editor state ----------------
 let pianoRoll = null;
 let currentSequence = null;
-let lastLoadedName = null;
 const history = createEditHistory();
 let menubar;
 const syncHistory = () => {
@@ -64,7 +63,7 @@ function restoreEdit(action) {
     refreshAll(); syncHistory();
 }
 const showProjectMixer = () => openMixer({ title: 'Project mixer',
-    channels: currentSequence.channels.filter(c => c.created !== false && c.kind !== 'comment').sort((a,b) => a.channel - b.channel),
+    channels: currentSequence.orderedChannels().filter(c => c.kind !== 'comment'),
     onChange: channel => {
         applyChannelVolume(channel);
         arrangerView?.refresh();
@@ -92,11 +91,11 @@ function refreshProjectTempo() {
 function useSequence(sequence, name = null, { keepHistory = false } = {}) {
     arrangerView?.stop();
     currentSequence = sequence;
+    if (name) sequence.name = name;
     refreshProjectTempo();
     if (keepHistory) history.commit(sequence.toJSON(0));
     else history.reset(sequence.toJSON(0));
     syncHistory();
-    lastLoadedName = name;
     selectedPatterns.clear();
     pianoRoll?.setChannel(null);
     arrangerView?.reset();
@@ -256,15 +255,17 @@ const writeProjects = (obj) => localStorage.setItem(STORAGE_KEY, JSON.stringify(
 const saveProjectToLocal = async () => {
     const seq = currentSequence;
     if (!seq) { log('Save: nothing to save', 'warn'); return; }
-    const name = await askName('Save project', 'Name', lastLoadedName || seq.name);
+    const name = await askName('Save project', 'Name', seq.name);
     if (!name || currentSequence !== seq) return;
     const projects = readProjects();
     const entry = {
-        seq: JSON.parse(seq.toJSON()),
+        seq: { ...JSON.parse(seq.toJSON()), name },
         timestamp: Date.now(),
     };
     try { writeProjects({ ...projects, [name]: entry }); }
     catch (error) { log(`Save failed: ${error}`, 'error'); setStatus('Could not save project'); return; }
+    seq.name = name;
+    commitEdit();
     log(`main: project saved "${name}"`);
     setStatus(`Saved: ${name}`);
     return true;
@@ -335,7 +336,7 @@ function exportProjectMidi(splitTracks) {
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        const base = lastLoadedName || currentSequence.name || 'untitled';
+        const base = currentSequence.name || 'untitled';
         a.download = `${base.replace(/\.midi?$/i, '')}${splitTracks ? '-tracks' : ''}.mid`;
         document.body.appendChild(a);
         a.click();

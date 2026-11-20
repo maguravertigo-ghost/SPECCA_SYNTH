@@ -81,3 +81,16 @@ test('recomposition preserves drums and source layout while substituting harmoni
     assert.equal(source.toJSON(0), unmodified);
     assert.throws(() => generateTrack({ type: 'recompose', source: new Sequence() }), /contains notes/);
 });
+
+test('modal styles stay in scale and evolving phrases differ without changing clip positions', () => {
+    for (const style of ['folk', 'medieval']) {
+        const config = { style, mood: 'dramatic', bars: 32, seed: 23 };
+        const original = generateTrack(config);
+        const evolving = generateTrack({ ...config, evolution: true });
+        assert.deepEqual(layout(evolving), layout(original));
+        assert.notDeepEqual(snapshot(evolving), snapshot(original));
+        assert.deepEqual(snapshot(evolving), snapshot(generateTrack({ ...config, evolution: true })));
+        assert.ok(evolving.patterns.filter(p => p.channel !== 9).every(p => p.notes.every(n => [0, 2, 3, 5, 7, 9, 10].includes(n.key % 12))));
+        assert.ok(validNotes(evolving));
+    }
+});

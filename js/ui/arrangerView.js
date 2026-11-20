@@ -206,7 +206,7 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
     const renderRows = () => {
         const s = getSeq();
         if (!s) { rows.innerHTML = ''; return; }
-        const channels = s.channels.filter(c => c.created !== false).sort((a, b) => a.channel - b.channel);
+        const channels = s.orderedChannels();
         const catalog = getInstrumentCatalog();
         const patterns = new Map(s.patterns.map(p => [p.id, p]));
         const byChannel = new Map(channels.map(c => [c.channel, []]));
@@ -578,6 +578,7 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
             <div class="arr-pattern-options" hidden></div>
             <div class="arr-menu-sep"></div>
             <button type="button" class="arr-menu-item" data-act="edit">Edit channel…</button>
+            <button type="button" class="arr-menu-item" data-act="clone">Clone channel</button>
             <button type="button" class="arr-menu-item" data-act="up">Move up</button>
             <button type="button" class="arr-menu-item" data-act="down">Move down</button>
             <div class="arr-menu-sep"></div>
@@ -614,20 +615,22 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
                 dialog.close();
                 if (act === 'edit') {
                     openChannelDialog({ slot: ch, isNew: false });
+                } else if (act === 'clone') {
+                    const copy = s.cloneChannel(ch);
+                    if (copy) {
+                        focusPattern(copy.channel, s.getChannelPattern(copy.channel)?.id);
+                        edit(info.kind !== 'comment');
+                    } else setStatus('No free MIDI channel for a copy.');
                 } else if (act === 'delete') {
                     if (!await confirmAction('Delete channel', `Delete ${name} and all its patterns and clips?`) || getSeq() !== s) return;
                     s.channels = s.channels.filter(c => c.channel !== ch);
+                    s.channelOrder = s.channelOrder.filter(id => id !== ch);
                     s.patterns = s.patterns.filter(p => p.channel !== ch);
                     const alivePatIds = new Set(s.patterns.map(p => p.id));
                     s.arrangement = s.arrangement.filter(pl => alivePatIds.has(pl.patternId));
                     edit(info.kind !== 'comment');
                 } else if (act === 'up' || act === 'down') {
-                    const sorted = s.channels.filter(c => c.created !== false).sort((a, b) => a.channel - b.channel);
-                    const idx = sorted.findIndex(c => c.channel === ch);
-                    const other = sorted[idx + (act === 'up' ? -1 : 1)];
-                    if (!other) return;
-                    s.swapChannels(ch, other.channel);
-                    edit();
+                    if (s.moveChannel(ch, act === 'up' ? -1 : 1)) edit(false);
                 }
             });
         });

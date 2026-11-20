@@ -5,6 +5,10 @@ export const TRACK_STYLES = {
     pop: { title: 'Pop', bpm: 110, groove: 'straight', kit: [0, 0, 33, 0], rhythm: [0, 3, 6, 8, 12] },
     chill: { title: 'Lo-fi', bpm: 82, groove: 'half-time', kit: [4, 5, 32, 0], rhythm: [0, 6, 10, 14] },
     retro: { title: 'Retro / Game', bpm: 138, groove: 'syncopated', kit: [80, 81, 38, 0], rhythm: [0, 2, 4, 7, 8, 10, 12, 14] },
+    folk: { title: 'Folk / World', bpm: 96, groove: 'euclidean', kit: [73, 24, 32, 0], rhythm: [0, 3, 6, 9, 12, 14],
+        modes: ['mixolydian', 'dorian'], phrases: [[0, 6, 3, 0], [0, 3, 6, 4], [3, 0, 6, 0]] },
+    medieval: { title: 'Medieval', bpm: 88, groove: 'half-time', kit: [74, 46, 42, 0], rhythm: [0, 4, 6, 10, 12],
+        modes: ['mixolydian', 'dorian'], phrases: [[0, 3, 6, 0], [0, 6, 4, 0], [0, 1, 6, 0]] },
 };
 const PALETTES = { piano: [0, 48, 32, 0], electric: [4, 27, 33, 0], synth: [81, 89, 38, 0] };
 const MOODS = {
@@ -23,18 +27,19 @@ const randomFrom = seed => () => {
 
 // Work with imported, editable data only. Nothing is uploaded and the source is never mutated.
 export function generateTrack({ type = 'compose', source = null, sourceUse = 'none', style = 'pop', mood = 'bright',
-    palette = 'style', groove = 'style', tonic = 0, bars = 16, bpm, seed = 1 } = {}) {
+    palette = 'style', groove = 'style', evolution = false, tonic = 0, bars = 16, bpm, seed = 1 } = {}) {
     const preset = TRACK_STYLES[style] ?? TRACK_STYLES.pop;
     const feeling = MOODS[mood] ?? MOODS.bright;
     const random = randomFrom(integer(seed, 1, 0, 0xffffffff));
     tonic = integer(tonic, 0, 0, 11);
-    const mode = feeling.mode;
+    const mode = preset.modes?.[+(feeling.mode === 'minor')] ?? feeling.mode;
+    const phrasesForStyle = preset.phrases ?? feeling.phrases;
     if ((type !== 'compose' || sourceUse !== 'none') && !source?.patterns.some(p => p.notes.length)) {
         throw new Error('Choose a MIDI file that contains notes.');
     }
     if (type === 'variation') return varyMIDI(source, sourceUse, random);
     const motif = type === 'compose' && source ? readMotif(source, sourceUse) : {};
-    const context = { preset, feeling, tonic, mode, random, motif, groove: groove === 'euclidean' ? groove : preset.groove };
+    const context = { preset, phrasesForStyle, tonic, mode, random, motif, evolution, groove: groove === 'euclidean' ? groove : preset.groove };
     if (type === 'recompose') return recomposeMIDI(source, context);
 
     bars = Math.ceil(integer(bars, 16, 8, 64) / 4) * 4;
@@ -44,30 +49,34 @@ export function generateTrack({ type = 'compose', source = null, sourceUse = 'no
             program: programs[i], isDrum: i === 3, volume: [88, 58, 84, 78][i], pan: [64, 47, 64, 64][i], created: true })) });
     const barTicks = seq.ticksPerBar;
     const phrases = bars / 4;
-    const verse = pick(feeling.phrases, random), chorus = pick(feeling.phrases.filter(p => p !== verse), random);
+    const verse = pick(phrasesForStyle, random), chorus = pick(phrasesForStyle.filter(p => p !== verse), random);
     const contour = motif.contour ?? pick([[0, 1, 1, 2, 0], [1, 0, 2, 1, 0], [0, 2, 1, 0, 1]], random);
     const clipCache = new Map();
+    const visits = new Map();
     for (let phrase = 0; phrase < phrases; phrase++) {
         const intro = phrase === 0 && phrases >= 3;
         const finale = phrase === phrases - 1;
         const section = intro ? 'Intro' : finale ? 'Ending' : phrases >= 6 && phrase === phrases - 3 ? 'Bridge'
             : phrase % 2 === 0 ? 'Chorus' : 'Verse';
+        const visit = visits.get(section) ?? 0;
+        visits.set(section, visit + 1);
+        const development = evolution ? (finale ? 2 : visit % 3) : 0;
         const progression = finale ? [...chorus.slice(0, 2), 4, 0] : section === 'Bridge' ? [5, 1, 3, 4] : section === 'Chorus' ? chorus : verse;
         seq.channels.forEach((ch, i) => {
             const role = ROLES[i];
             if (intro && (role === 'lead' || role === 'drums')) return;
-            const key = `${role}:${section}`;
+            const key = `${role}:${section}:${development}`;
             let pattern = clipCache.get(key);
             if (!pattern) {
                 pattern = seq.createChannelPattern(ch.channel);
-                pattern.name += ` · ${section}`;
+                pattern.name += ` · ${section}${development && !finale ? ` ${development + 1}` : ''}`;
                 pattern.lengthTicks = 4 * barTicks;
                 let previous = [];
                 progression.forEach((degree, bar) => {
                     const resolve = finale && bar === 3;
                     const chord = voiceChord(tonic, mode, degree, previous);
                     previous = chord;
-                    const notes = partNotes({ ...context, contour, degree, chord, ticks: barTicks, role, bar,
+                    const notes = partNotes({ ...context, contour, degree, chord, ticks: barTicks, role, bar, development,
                         answer: bar === 2, resolve, full: section === 'Chorus' || finale });
                     for (const note of notes) seq.addNote(pattern.id, { ...note, tick: note.tick + bar * barTicks, track: ch.channel });
                 });
@@ -79,15 +88,21 @@ export function generateTrack({ type = 'compose', source = null, sourceUse = 'no
     return seq;
 }
 
-function partNotes({ preset, groove, tonic, mode, motif, random, degree, chord, ticks, role, bar, contour, answer, resolve, full }) {
+function partNotes({ preset, groove, tonic, mode, motif, random, degree, chord, ticks, role, bar, contour, answer, resolve, full, development = 0 }) {
     const pulse = (key, offset, end, vel) => {
         const tick = Math.min(ticks - 1, Math.round(ticks * offset / 16));
         return { key, tick, dur: Math.max(1, Math.round(ticks * end / 16) - tick), vel };
     };
-    if (role === 'lead') return phraseNotes({ tonic, mode, degree, ticks, contour, answer, resolve,
-        rhythm: motif.rhythm ?? (full ? preset.rhythm : preset.rhythm.filter((_, i) => i % 2 === 0)), center: full ? 77 : 71 });
+    if (role === 'lead') {
+        const base = motif.rhythm ?? (full ? preset.rhythm : preset.rhythm.filter((_, i) => i % 2 === 0));
+        const rhythm = development && bar % 2 ? [...base, development === 1 ? 11 : 15] : base;
+        return phraseNotes({ tonic, mode, degree, ticks, contour, answer: answer || (development === 2 && bar % 2 === 1),
+            resolve, rhythm, center: (full ? 77 : 71) + (development === 2 ? 3 : 0) });
+    }
     if (role === 'chords') {
-        if (preset === TRACK_STYLES.retro && !resolve) return [0, 3, 6, 8, 11, 14].map((off, i) => pulse(chord[i % 3], off, off + 2, i ? 68 : 84));
+        if (preset === TRACK_STYLES.medieval) return [scaleTone(tonic, mode, degree, 48), scaleTone(tonic, mode, degree + 4, 48)].map(key => pulse(key, 0, 15, 76));
+
+        if ((preset === TRACK_STYLES.retro || preset === TRACK_STYLES.folk || development === 2) && !resolve) return [0, 3, 6, 8, 11, 14].map((off, i) => pulse(chord[i % 3], off, off + 2, i ? 68 : 84));
         return chord.flatMap(key => full && preset !== TRACK_STYLES.chill && !resolve
             ? [pulse(key, 0, 8, 86), pulse(key, 10, 15, 72)] : [pulse(key, 0, 15, 79)]);
     }
@@ -102,7 +117,7 @@ function partNotes({ preset, groove, tonic, mode, motif, random, degree, chord, 
     }
     const hits = generatePatternNotes({ lengthTicks: ticks, ticksPerBar: ticks, isDrum: true, style: groove, random });
     if (resolve) return hits.filter(n => n.tick === 0);
-    if (full && bar % 4 === 3 && ticks >= 16) hits.push(pulse(45, 14, 15, 86), pulse(47, 15, 16, 90));
+    if ((full || development) && bar % 4 === 3 && ticks >= 16) hits.push(pulse(45, 14, 15, 86), pulse(47, 15, 16, 90));
     return hits;
 }
 
@@ -179,7 +194,7 @@ function recomposeMIDI(source, context) {
     const bass = melodic.find(ch => ch.program >= 32 && ch.program <= 39) ?? melodic.find(ch => mean(ch) < 54);
     const lead = melodic.filter(ch => ch !== bass).sort((a,b) => mean(b) - mean(a))[0] ?? bass;
     const roles = new Map(melodic.map(ch => [ch.channel, ch === lead ? 'lead' : ch === bass ? 'bass' : 'chords']));
-    const progression = pick(context.feeling.phrases, context.random);
+    const progression = pick(context.phrasesForStyle, context.random);
     const contour = pick([[0, 1, 2, 1, 0], [1, 0, 2, 0, 1]], context.random);
     const used = new Set();
     const remapped = new Map();
@@ -189,7 +204,8 @@ function recomposeMIDI(source, context) {
         const role = roles.get(original?.channel);
         if (!role) { used.add(clip.patternId); continue; }
         const phase = Math.floor(clip.startTick / seq.ticksPerBar) % progression.length;
-        const signature = `${original.id}:${phase}`;
+        const development = context.evolution ? Math.floor(clip.startTick / (4 * seq.ticksPerBar)) % 3 : 0;
+        const signature = `${original.id}:${phase}:${development}`;
         let replacement = remapped.get(signature);
         if (!replacement) {
             workBars += Math.ceil(original.lengthTicks / seq.ticksPerBar);
@@ -201,7 +217,7 @@ function recomposeMIDI(source, context) {
                 const degree = progression[(bar + phase) % progression.length];
                 const chord = voiceChord(context.tonic, context.mode, degree, previous);
                 previous = chord;
-                const notes = partNotes({ ...context, motif: {}, role, contour, degree, chord, bar, answer: (bar + phase) % 4 === 2,
+                const notes = partNotes({ ...context, motif: {}, role, contour, degree, chord, bar, development, answer: (bar + phase) % 4 === 2,
                     full: (bar + phase) % 4 >= 2, ticks: Math.min(seq.ticksPerBar, replacement.lengthTicks - at) });
                 for (const note of notes) seq.addNote(replacement.id, { ...note, tick: note.tick + at, track: original.channel });
             }

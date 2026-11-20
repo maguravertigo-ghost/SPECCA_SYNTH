@@ -2,8 +2,9 @@
 
 const DEFAULT_TPQ = 480;
 
+let nextId = 0;
 function makeId(prefix) {
-    return prefix + '_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6);
+    return prefix + '_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6) + '_' + (++nextId).toString(36);
 }
 
 export class Sequence {
@@ -21,6 +22,7 @@ export class Sequence {
             { channel: 2, program: 0, isDrum: false, volume: 100, pan: 64 },
             { channel: 9, program: 0, isDrum: true,  volume: 100, pan: 64 },
         ];
+        this.channelOrder = data.channelOrder ?? [];
         this.patternCounters = data.patternCounters ?? {};
         this.patterns = data.patterns ?? [];
         this.arrangement = data.arrangement ?? [];
@@ -65,6 +67,7 @@ export class Sequence {
             stepsPerBar: this.stepsPerBar,
             patternLengthTicks: this.patternLengthTicks,
             channels: this.channels,
+            channelOrder: this.channelOrder,
             patternCounters: this.patternCounters,
             patterns: this.patterns,
             arrangement: this.arrangement,
@@ -130,6 +133,60 @@ export class Sequence {
 
     ensureChannelPattern(channel) {
         return this.getChannelPattern(channel) ?? this.createChannelPattern(channel);
+    }
+
+    orderedChannels() {
+        const channels = new Map(this.channels.filter(c => c.created !== false).sort((a,b) => a.channel - b.channel).map(c => [c.channel, c]));
+        const ordered = [];
+        for (const id of this.channelOrder) {
+            if (!channels.has(id)) continue;
+            ordered.push(channels.get(id));
+            channels.delete(id);
+        }
+        return [...ordered, ...channels.values()];
+    }
+
+    moveChannel(channel, step) {
+        const order = this.orderedChannels().map(c => c.channel);
+        const index = order.indexOf(channel), other = index + step;
+        if (index < 0 || other < 0 || other >= order.length) return false;
+        [order[index], order[other]] = [order[other], order[index]];
+        this.channelOrder = order;
+        return true;
+    }
+
+    cloneChannel(channel) {
+        const source = this.channels.find(c => c.channel === channel && c.created !== false);
+        if (!source) return null;
+        const used = new Set(this.orderedChannels().map(c => c.channel));
+        // Free MIDI lane, independent of the visual position; never remap existing notes.
+        const lanes = Array.from({ length: 128 * 16 }, (_, i) => i);
+        const lane = lanes.find(i => !used.has(i) && (i % 16 === 9) === !!source.isDrum && (source.isDrum ? i < 16 : true))
+            ?? lanes.find(i => !used.has(i));
+        if (lane === undefined) return null;
+        const name = `${source.name || `Ch ${channel + 1}`} (copy)`;
+        const order = [...used];
+        order.splice(order.indexOf(channel) + 1, 0, lane);
+        this.channelOrder = order;
+        const clone = { ...source, channel: lane, name, created: true };
+        this.channels = this.channels.filter(c => c.channel !== lane);
+        this.channels.push(clone);
+        delete this.patternCounters[lane];
+        const originals = this.patterns.filter(p => p.channel === channel);
+        const copies = new Map();
+        for (const original of originals) {
+            const copy = this.createChannelPattern(lane);
+            const suffix = original.name?.replace(/^\d+\.\d+\s*(?:·\s*)?/, '');
+            if (suffix) copy.name += ` · ${suffix}`;
+            copy.lengthTicks = original.lengthTicks;
+            if (original.comment !== undefined) copy.comment = original.comment;
+            copy.notes = original.notes.map(n => ({ ...n, id: makeId('n'), track: lane }));
+            copies.set(original.id, copy.id);
+        }
+        for (const clip of [...this.arrangement]) {
+            if (copies.has(clip.patternId)) this.placePattern(copies.get(clip.patternId), clip.startTick);
+        }
+        return clone;
     }
 
     swapChannels(first, second) {
