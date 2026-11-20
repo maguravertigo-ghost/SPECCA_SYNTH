@@ -49,6 +49,14 @@ export function phraseNotes({ tonic, mode, degree, ticks, rhythm = [0, 4, 7, 10,
     return notes;
 }
 
+// Distribute hits around a cycle with gaps that differ by at most one step.
+export function euclideanPulses(steps, hits, rotation = 0) {
+    if (!Number.isSafeInteger(steps) || steps < 1 || steps > 128 || !Number.isSafeInteger(hits) || hits < 1 || hits > steps) return [];
+    rotation = ((Math.trunc(rotation) % steps) + steps) % steps;
+    return Array.from({ length: steps }, (_, i) => i)
+        .filter(i => (((i - rotation + steps) % steps) * hits) % steps < hits);
+}
+
 // Returns ordinary, editable MIDI notes. No network, synth or DOM dependencies.
 export function generatePatternNotes({ lengthTicks, ticksPerBar, stepsPerBar = 16, tonic = 0, mode = 'major',
     style = 'chords', isDrum = false, random = Math.random } = {}) {
@@ -68,10 +76,10 @@ export function generatePatternNotes({ lengthTicks, ticksPerBar, stepsPerBar = 1
     if (isDrum) {
         for (let start = 0, bar = 0; start < lengthTicks; start += ticksPerBar, bar++) {
             const at = fraction => start + Math.min(ticksPerBar - 1, Math.min(steps - 1, Math.round(steps * fraction / 16)) * step);
-            const kick = style === 'syncopated' ? choose([[0, 3, 8, 11], [0, 6, 8, 14]])
+            const kick = style === 'euclidean' ? euclideanPulses(16, 5) : style === 'syncopated' ? choose([[0, 3, 8, 11], [0, 6, 8, 14]])
                 : style === 'half-time' ? choose([[0, 6, 11], [0, 4, 14]]) : choose([[0, 8], [0, 8, 10]]);
             const snare = style === 'half-time' ? [8] : [4, 12];
-            const hat = style === 'syncopated' ? [0, 2, 4, 7, 8, 10, 12, 14, 15] : [0, 2, 4, 6, 8, 10, 12, 14];
+            const hat = style === 'euclidean' ? euclideanPulses(16, 7, bar % 2) : style === 'syncopated' ? [0, 2, 4, 7, 8, 10, 12, 14, 15] : [0, 2, 4, 6, 8, 10, 12, 14];
             for (const beat of kick) add(36, at(beat), step, beat ? 93 : 110);
             for (const beat of snare) add(38, at(beat), step, 100);
             for (const beat of hat) add(beat === 14 && bar % 2 ? 46 : 42, at(beat), step * .65, beat % 4 ? 54 : 73);

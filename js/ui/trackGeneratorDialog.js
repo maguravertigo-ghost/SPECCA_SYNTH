@@ -3,7 +3,7 @@ import { TONICS } from '../editor/noteGenerator.js';
 import { generateTrack, TRACK_STYLES } from '../editor/trackGenerator.js';
 
 const MODES = {
-    compose: { title: 'Compose a track', help: 'Create a melody, chords, bass and drums. Optionally borrow a melodic shape or rhythm from a MIDI.' },
+    compose: { title: 'Compose a track', help: 'Create a melody, chords, bass and drums. Optionally borrow a melodic shape or rhythm from a MIDI. A borrowed drum pattern takes priority over the groove preset.' },
     variation: { title: 'MIDI variation', help: 'Keep the instruments, clip layout and tempo. Vary the phrasing or rhythm without changing the original pitch classes.' },
     recompose: { title: 'New melody in a MIDI arrangement', help: 'Write new melodic parts and harmony in the source clips. Keep the instruments, timing of the clips, tempo changes and drums.' },
 };
@@ -22,6 +22,7 @@ export function openTrackGenerator(type) {
                     <label class="arr-field"><span>Mood</span><select name="mood"><option value="bright">Bright · major</option><option value="calm">Calm · major</option><option value="dramatic">Dramatic · minor</option></select></label>
                     <label class="arr-field"><span>Key</span><select name="tonic"></select></label>` : ''}
                 ${type === 'compose' ? `<label class="arr-field"><span>Instruments</span><select name="palette"><option value="style">Style preset</option><option value="piano">Piano & strings</option><option value="electric">Electric keys & guitar</option><option value="synth">Synths</option></select></label>
+                    <label class="arr-field"><span>Drum groove</span><select name="groove"><option value="style">Style preset</option><option value="euclidean">Euclidean</option></select></label>
                     <label class="arr-field"><span>Length</span><select name="bars"><option value="8">8 bars · sketch</option><option value="16" selected>16 bars · short track</option><option value="32">32 bars</option><option value="64">64 bars</option></select></label>
                     <label class="arr-field"><span>Tempo (BPM)</span><input type="number" name="bpm" required min="45" max="220" value="110"></label>` : ''}
                 ${type === 'compose' ? `<label class="arr-field"><span>Use MIDI for</span><select name="sourceUse"><option value="none">No source</option><option value="notes">Melody shape</option><option value="rhythm">Rhythm</option></select></label>` : ''}
@@ -54,7 +55,7 @@ export function openTrackGenerator(type) {
             if (submit.disabled) return;
             submit.disabled = true;
             error.hidden = true;
-            const { style, mood, palette, tonic, bars, bpm, seed, sourceUse } = Object.fromEntries(new FormData(form));
+            const { style, mood, palette, groove, tonic, bars, bpm, seed, sourceUse } = Object.fromEntries(new FormData(form));
             try {
                 let source = null;
                 if (wantsMIDI()) {
@@ -65,7 +66,7 @@ export function openTrackGenerator(type) {
                     try { source = importMidi(bytes, file.name); }
                     catch { throw new Error('Could not read this MIDI file. Choose a valid .mid or .midi file.'); }
                 }
-                result = generateTrack({ type, source, sourceUse, style, mood, palette, tonic, bars, bpm, seed });
+                result = generateTrack({ type, source, sourceUse, style, mood, palette, groove, tonic, bars, bpm, seed });
                 dialog.close();
             } catch (err) {
                 error.textContent = err.message;

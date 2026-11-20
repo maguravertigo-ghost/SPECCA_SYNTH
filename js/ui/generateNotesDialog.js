@@ -23,7 +23,7 @@ export function chooseGeneratedNotes({ isDrum, hasNotes, defaults = {} }) {
             fields.tonic.value = defaults.tonic ?? '0';
             fields.mode.value = defaults.mode ?? 'major';
         }
-        const rhythms = isDrum ? [['Straight', 'straight'], ['Syncopated', 'syncopated'], ['Half-time', 'half-time']]
+        const rhythms = isDrum ? [['Straight', 'straight'], ['Syncopated', 'syncopated'], ['Half-time', 'half-time'], ['Euclidean', 'euclidean']]
             : [['Chords', 'chords'], ['Melody', 'melody'], ['Arpeggio', 'arpeggio'], ['Syncopated chords', 'syncopated']];
         fields.style.replaceChildren(...rhythms.map(args => new Option(...args)));
         if (rhythms.some(([, value]) => defaults.style === value)) fields.style.value = defaults.style;

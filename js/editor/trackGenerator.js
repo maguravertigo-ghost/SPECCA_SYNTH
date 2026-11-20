@@ -23,7 +23,7 @@ const randomFrom = seed => () => {
 
 // Work with imported, editable data only. Nothing is uploaded and the source is never mutated.
 export function generateTrack({ type = 'compose', source = null, sourceUse = 'none', style = 'pop', mood = 'bright',
-    palette = 'style', tonic = 0, bars = 16, bpm, seed = 1 } = {}) {
+    palette = 'style', groove = 'style', tonic = 0, bars = 16, bpm, seed = 1 } = {}) {
     const preset = TRACK_STYLES[style] ?? TRACK_STYLES.pop;
     const feeling = MOODS[mood] ?? MOODS.bright;
     const random = randomFrom(integer(seed, 1, 0, 0xffffffff));
@@ -34,7 +34,7 @@ export function generateTrack({ type = 'compose', source = null, sourceUse = 'no
     }
     if (type === 'variation') return varyMIDI(source, sourceUse, random);
     const motif = type === 'compose' && source ? readMotif(source, sourceUse) : {};
-    const context = { preset, feeling, tonic, mode, random, motif };
+    const context = { preset, feeling, tonic, mode, random, motif, groove: groove === 'euclidean' ? groove : preset.groove };
     if (type === 'recompose') return recomposeMIDI(source, context);
 
     bars = Math.ceil(integer(bars, 16, 8, 64) / 4) * 4;
@@ -79,7 +79,7 @@ export function generateTrack({ type = 'compose', source = null, sourceUse = 'no
     return seq;
 }
 
-function partNotes({ preset, tonic, mode, motif, random, degree, chord, ticks, role, bar, contour, answer, resolve, full }) {
+function partNotes({ preset, groove, tonic, mode, motif, random, degree, chord, ticks, role, bar, contour, answer, resolve, full }) {
     const pulse = (key, offset, end, vel) => {
         const tick = Math.min(ticks - 1, Math.round(ticks * offset / 16));
         return { key, tick, dur: Math.max(1, Math.round(ticks * end / 16) - tick), vel };
@@ -100,7 +100,7 @@ function partNotes({ preset, tonic, mode, motif, random, degree, chord, ticks, r
     if (motif.drumHits?.length && !resolve) {
         return motif.drumHits.map(({ key, step, vel }) => pulse(key, step, step + 1, vel));
     }
-    const hits = generatePatternNotes({ lengthTicks: ticks, ticksPerBar: ticks, isDrum: true, style: preset.groove, random });
+    const hits = generatePatternNotes({ lengthTicks: ticks, ticksPerBar: ticks, isDrum: true, style: groove, random });
     if (resolve) return hits.filter(n => n.tick === 0);
     if (full && bar % 4 === 3 && ticks >= 16) hits.push(pulse(45, 14, 15, 86), pulse(47, 15, 16, 90));
     return hits;

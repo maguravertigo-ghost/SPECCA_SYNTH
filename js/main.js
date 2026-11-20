@@ -321,6 +321,27 @@ async function generateProject(type) {
     log(`Generated ${sequence.name} — ${sequence.arrangement.length} editable clips`);
 }
 
+function exportProjectMidi(splitTracks) {
+    log('Menu: Save As MIDI…');
+    if (!currentSequence) { log('Save As: nothing to save', 'warn'); return; }
+    try {
+        const midiBuf = writeArrangementMIDI(currentSequence, { splitTracks });
+        const blob = new Blob([midiBuf], { type: 'audio/midi' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        const base = lastLoadedName || currentSequence.name || 'untitled';
+        a.download = `${base.replace(/\.midi?$/i, '')}${splitTracks ? '-tracks' : ''}.mid`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+        log(`Menu: saved ${a.download} (${midiBuf.byteLength} bytes)`);
+    } catch (err) {
+        log(`Save As failed: ${err}`, 'error');
+    }
+}
+
 // ---------------- Menubar ----------------
 menubar = mountMenubar({
     new: () => {
@@ -346,26 +367,8 @@ menubar = mountMenubar({
     varyTrack: () => generateProject('variation'),
     recomposeTrack: () => generateProject('recompose'),
     save: saveProjectToLocal,
-    saveAs: () => {
-        log('Menu: Save As MIDI…');
-        if (!currentSequence) { log('Save As: nothing to save', 'warn'); return; }
-        try {
-            const midiBuf = writeArrangementMIDI(currentSequence);
-            const blob = new Blob([midiBuf], { type: 'audio/midi' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            const base = lastLoadedName || currentSequence.name || 'untitled';
-            a.download = base.endsWith('.mid') ? base : `${base}.mid`;
-            document.body.appendChild(a);
-            a.click();
-            a.remove();
-            URL.revokeObjectURL(url);
-            log(`Menu: saved ${a.download} (${midiBuf.byteLength} bytes)`);
-        } catch (err) {
-            log(`Save As failed: ${err}`, 'error');
-        }
-    },
+    saveAs: () => exportProjectMidi(false),
+    saveTracks: () => exportProjectMidi(true),
 
     undo: () => restoreEdit('undo'),
     redo: () => restoreEdit('redo'),

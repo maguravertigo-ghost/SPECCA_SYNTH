@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { generatePatternNotes, withoutNoteConflicts } from '../js/editor/noteGenerator.js';
+import { euclideanPulses, generatePatternNotes, withoutNoteConflicts } from '../js/editor/noteGenerator.js';
 
 const base = { lengthTicks: 1920, ticksPerBar: 1920, stepsPerBar: 16, random: () => 0 };
 const inRange = (notes, length) => notes.every(n => Number.isInteger(n.tick) && Number.isInteger(n.dur) &&
@@ -50,4 +50,17 @@ test('Piano Roll Melody uses a monophonic, in-key phrase in each chord span', ()
     assert.ok(inRange(notes, base.lengthTicks));
     assert.ok(notes.every((n, i) => [0, 2, 3, 5, 7, 8, 10].includes((n.key - 5) % 12) &&
         (i === 0 || n.tick >= notes[i - 1].tick + notes[i - 1].dur)));
+});
+
+
+test('Euclidean pulses fill the cycle evenly and rotate without changing hit count', () => {
+    for (const [steps, hits] of [[16, 5], [16, 7], [12, 5], [1, 1]]) {
+        const pulses = euclideanPulses(steps, hits, -1);
+        const gaps = pulses.map((v, i) => (pulses[i + 1] ?? pulses[0] + steps) - v);
+        assert.equal(pulses.length, hits);
+        assert.ok(Math.max(...gaps) - Math.min(...gaps) <= 1);
+    }
+    const groove = generatePatternNotes({ ...base, isDrum: true, style: 'euclidean' });
+    assert.equal(groove.filter(n => n.key === 36).length, 5);
+    assert.equal(groove.filter(n => [42, 46].includes(n.key)).length, 7);
 });

@@ -8,6 +8,7 @@ const ACTIONS = {
 	'file-project-settings': 'projectSettings',
     'file-save':         'save',
     'file-save-as':      'saveAs',
+    'file-save-tracks':  'saveTracks',
 
     'edit-undo':         'undo',
     'edit-redo':         'redo',

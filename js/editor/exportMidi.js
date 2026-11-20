@@ -14,17 +14,18 @@ function gsMessage(part, parameter, value) {
 const gsPart = channel => channel === 9 ? 0 : channel < 9 ? channel + 1 : channel;
 const marker = text => [0xff, 0x06, text.length, ...Array.from(text, c => c.charCodeAt(0))];
 
-function writeSequence(sequence, clips, { loop = null, respectMute = false, liveMix = false, previewAt = null } = {}) {
+function writeSequence(sequence, clips, { loop = null, respectMute = false, liveMix = false, previewAt = null, splitTracks = false } = {}) {
     const meta = [];
-    const ports = new Map();
+    const parts = new Map();
+    const trackKey = lane => splitTracks ? lane : Math.floor(lane / 16);
     const active = new Set();
     const visual = new Set(sequence.channels.filter(c => c.kind === 'comment').map(c => c.channel));
     let endTick = 0;
-    const emit = (tick, order, data, port = null) => {
+    const emit = (tick, order, data, part = null) => {
         let events = meta;
-        if (port !== null) {
-            if (!ports.has(port)) ports.set(port, []);
-            events = ports.get(port);
+        if (part !== null) {
+            if (!parts.has(part)) parts.set(part, []);
+            events = parts.get(part);
         }
         events.push({ tick, order, data });
     };
@@ -35,7 +36,7 @@ function writeSequence(sequence, clips, { loop = null, respectMute = false, live
         for (const note of pattern.notes) {
             const lane = note.track;
             if (!Number.isInteger(lane) || lane < 0 || lane >= 128 * 16) throw new Error(`Invalid MIDI lane: ${lane}`);
-            const port = Math.floor(lane / 16), ch = lane % 16;
+            const part = trackKey(lane), ch = lane % 16;
             const localStart = Math.max(0, Math.round(note.tick));
             if (trim && localStart >= pattern.lengthTicks) continue;
             const tick = startTick + localStart;
@@ -43,25 +44,25 @@ function writeSequence(sequence, clips, { loop = null, respectMute = false, live
             const endNote = trim ? Math.min(end, startTick + pattern.lengthTicks) : end;
             const velocity = note.ghost ? 1 : Math.max(1, Math.min(127, note.vel ?? 90));
             active.add(lane);
-            emit(tick, 1, [0x90 | ch, note.key & 0x7f, velocity], port);
-            emit(endNote, 0, [0x80 | ch, note.key & 0x7f, 0x40], port);
+            emit(tick, 1, [0x90 | ch, note.key & 0x7f, velocity], part);
+            emit(endNote, 0, [0x80 | ch, note.key & 0x7f, 0x40], part);
             endTick = Math.max(endTick, endNote);
         }
     }
 
-    const sysex = (bytes, order, port) => emit(0, order, [0xf0, ...writeVarLen(bytes.length), ...bytes], port);
-    if (ports.size) sysex(gsMessage(0, 0x7f, 0), -6, Math.min(...ports.keys()));
+    const sysex = (bytes, order, part) => emit(0, order, [0xf0, ...writeVarLen(bytes.length), ...bytes], part);
+    if (parts.size) sysex(gsMessage(0, 0x7f, 0), -6, Math.min(...parts.keys()));
     for (const lane of active) {
-        const port = Math.floor(lane / 16), ch = lane % 16;
+        const part = trackKey(lane), ch = lane % 16;
         const info = sequence.channels.find(c => c.channel === lane) ?? {};
         const isDrum = info.isDrum ?? (ch === 9);
-        if (isDrum !== (ch === 9)) sysex(gsMessage(0x10 | gsPart(ch), 0x15, isDrum ? 1 : 0), -5, port);
-        emit(0, -4, [0xb0 | ch, 0, (info.bankMSB ?? 0) & 0x7f], port);
-        emit(0, -3, [0xb0 | ch, 32, (info.bankLSB ?? 0) & 0x7f], port);
-        emit(0, -2, [0xc0 | ch, (info.program ?? 0) & 0x7f], port);
+        if (isDrum !== (ch === 9)) sysex(gsMessage(0x10 | gsPart(ch), 0x15, isDrum ? 1 : 0), -5, part);
+        emit(0, -4, [0xb0 | ch, 0, (info.bankMSB ?? 0) & 0x7f], part);
+        emit(0, -3, [0xb0 | ch, 32, (info.bankLSB ?? 0) & 0x7f], part);
+        emit(0, -2, [0xc0 | ch, (info.program ?? 0) & 0x7f], part);
         const volume = liveMix ? 100 : respectMute && info.muted ? 0 : (info.volume ?? 100);
-        emit(0, -1, [0xb0 | ch, 7, Math.round(volume * 127 / 100)], port);
-        emit(0, -1, [0xb0 | ch, 10, (info.pan ?? 64) & 0x7f], port);
+        emit(0, -1, [0xb0 | ch, 7, Math.round(volume * 127 / 100)], part);
+        emit(0, -1, [0xb0 | ch, 10, (info.pan ?? 64) & 0x7f], part);
     }
     if (loop) {
         const loopEnd = loop.end ?? endTick;
@@ -81,7 +82,7 @@ function writeSequence(sequence, clips, { loop = null, respectMute = false, live
     const ppq = Math.max(1, sequence.timeDivision || 480);
     const steps = sequence.stepsPerBar || 16;
     emit(0, -8, [0xff, 0x58, 4, steps % 4 === 0 ? steps / 4 : steps, steps % 4 === 0 ? 2 : 4, 24, 8]);
-    const multiPort = [...ports.keys()].some(port => port > 0);
+    const formatOne = splitTracks || [...parts.keys()].some(part => part > 0);
     const encodeTrack = (events) => {
         events.sort((a, b) => a.tick - b.tick || a.order - b.order);
         const track = [];
@@ -93,14 +94,20 @@ function writeSequence(sequence, clips, { loop = null, respectMute = false, live
         track.push(...writeVarLen(endTick - last), 0xff, 0x2f, 0);
         return track;
     };
-    const tracks = multiPort ? [encodeTrack(meta), ...[...ports.keys()].sort((a, b) => a - b).map(port => {
-        emit(0, -10, [0xff, 0x21, 1, port], port);
-        return encodeTrack(ports.get(port));
-    })] : [encodeTrack(meta.concat(ports.get(0) ?? []))];
+    const tracks = formatOne ? [encodeTrack(meta), ...[...parts.keys()].sort((a, b) => a - b).map(part => {
+        const port = splitTracks ? Math.floor(part / 16) : part;
+        emit(0, -11, [0xff, 0x21, 1, port], part);
+        if (splitTracks) {
+            const info = sequence.channels.find(c => c.channel === part);
+            const name = new TextEncoder().encode((info?.name || `Channel ${part + 1}`).slice(0, 160));
+            emit(0, -10, [0xff, 0x03, ...writeVarLen(name.length), ...name], part);
+        }
+        return encodeTrack(parts.get(part));
+    })] : [encodeTrack(meta.concat(parts.get(0) ?? []))];
     const out = new Uint8Array(14 + tracks.reduce((length, track) => length + 8 + track.length, 0));
     const view = new DataView(out.buffer);
     out.set([0x4d, 0x54, 0x68, 0x64, 0, 0, 0, 6]);
-    view.setUint16(8, multiPort ? 1 : 0);
+    view.setUint16(8, formatOne ? 1 : 0);
     view.setUint16(10, tracks.length);
     view.setUint16(12, ppq);
     let offset = 14;

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
+import { BasicMIDI } from '../main.min.js';
 import { Sequence } from '../js/editor/sequence.js';
 import { importMidi } from '../js/editor/importMidi.js';
 import { writeArrangementMIDI } from '../js/editor/exportMidi.js';
@@ -58,4 +59,33 @@ test('channel patch and bank assignments survive arrangement MIDI export', () =>
         assert.equal(result.volume, ch.volume);
         assert.equal(result.pan, ch.pan);
     }
+});
+
+
+test('separate-track MIDI writes named format-1 lanes with their own channel and port', () => {
+    const seq = new Sequence({ tempo: 98, tempoChanges: [{ tick: 1920, tempo: 126 }], channels: [
+        { channel: 0, name: 'Lead', program: 80, isDrum: false },
+        { channel: 1, name: 'Bass', program: 33, isDrum: false },
+        { channel: 9, name: 'Noise guide', program: 0, isDrum: true },
+        { channel: 16, name: 'Second port', program: 48, isDrum: false },
+    ] });
+    for (const ch of seq.channels) {
+        const p = seq.ensureChannelPattern(ch.channel);
+        seq.addNote(p.id, { track: ch.channel, key: ch.isDrum ? 36 : 62, tick: 120, dur: 240 });
+        seq.placePattern(p.id, 1920);
+    }
+    const bytes = writeArrangementMIDI(seq, { splitTracks: true });
+    assert.equal(new DataView(bytes).getUint16(8), 1);
+    const parsed = BasicMIDI.fromArrayBuffer(bytes);
+    assert.equal(parsed.tracks.length, 5);
+    assert.equal(parsed.tracks[0].events.filter(e => e.statusByte === 0x51).length, 2);
+    assert.deepEqual(parsed.tracks.slice(1).map(t => t.name), seq.channels.map(ch => ch.name));
+    assert.deepEqual(parsed.tracks.slice(1).map(t => t.port), [0, 0, 0, 1]);
+    for (const [i, track] of parsed.tracks.slice(1).entries()) {
+        const channel = seq.channels[i];
+        const keys = track.events.filter(e => (e.statusByte & 0xf0) === 0x90);
+        assert.deepEqual(keys.map(e => [e.statusByte & 15, e.ticks]), [[channel.channel % 16, 2040]]);
+        assert.equal(track.events.find(e => (e.statusByte & 0xf0) === 0xc0)?.data[0], channel.program);
+    }
+    assert.deepEqual(notes(importMidi(bytes)), notes(importMidi(writeArrangementMIDI(seq))));
 });
