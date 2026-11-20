@@ -65,7 +65,12 @@ function restoreEdit(action) {
 }
 const showProjectMixer = () => openMixer({ title: 'Project mixer',
     channels: currentSequence.channels.filter(c => c.created !== false && c.kind !== 'comment').sort((a,b) => a.channel - b.channel),
-    onChange: channel => { applyChannelVolume(channel); arrangerView?.refresh(); }, onCommit: commitEdit,
+    onChange: channel => {
+        applyChannelVolume(channel);
+        arrangerView?.refresh();
+        if (pianoRoll?.getChannel() === channel.channel) pianoRoll.refreshChannelMute();
+    },
+    onCommit: commitEdit,
 });
 const selectedPatterns = new Map();
 const getChannelPattern = (channel) => {

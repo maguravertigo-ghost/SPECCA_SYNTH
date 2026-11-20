@@ -65,10 +65,13 @@ export function mountPianoRoll(rootEl, opts = {}) {
             <div class="pr-toolbar">
 			    <button id="prBackBtn" class="pr-t-btn" type="button" title="Back to Arranger"><span class="material-icon" aria-hidden="true">arrow_back</span> Arranger</button>
                 <span class="pr-sep"></span>
-                <label class="pr-num" title="Master volume">
-                    <span>Vol</span>
-                    <input id="prMasterVol" type="range" min="0" max="100" value="100" style="width:90px">
-                </label>
+                <div class="pr-volume-controls">
+                    <span id="prChannelMute" role="status" aria-label="Current channel mute status" title="Current channel mute status" hidden></span>
+                    <label class="pr-num" title="Master volume">
+                        <span>Vol</span>
+                        <input id="prMasterVol" type="range" min="0" max="100" value="100" style="width:90px">
+                    </label>
+                </div>
                 <span class="pr-sep"></span>
 				<span class="pr-sep"></span>
                 <button id="prMixerBtn" class="pr-t-btn" type="button" title="Project mixer" aria-label="Project mixer"><span class="material-icon" aria-hidden="true">tune</span></button>
@@ -899,6 +902,14 @@ export function mountPianoRoll(rootEl, opts = {}) {
     // ------------------------------------------------------------------
     // Channel/pattern header and instrument picker
     // ------------------------------------------------------------------
+    const refreshChannelMute = () => {
+        const channel = getChannelInfo();
+        const indicator = $('#prChannelMute');
+        indicator.hidden = !channel || channel.kind === 'comment';
+        const status = channel?.muted ? 'MUTE' : 'ON';
+        indicator.dataset.state = channel?.muted ? 'muted' : 'on';
+        if (indicator.textContent !== status) indicator.textContent = status;
+    };
     const refreshHeader = () => {
         const channel = getChannelInfo();
         const pattern = getPattern();
@@ -906,6 +917,7 @@ export function mountPianoRoll(rootEl, opts = {}) {
         instrumentBtn.textContent = channel ? `Instrument: ${getInstrumentLabel(channel)}` : 'Instrument…';
         instrumentBtn.title = channel ? instrumentFamily(channel) : '';
         const comment = isComment();
+        refreshChannelMute();
         instrumentBtn.hidden = comment;
         instrumentBtn.disabled = !channel;
         rootEl.querySelector('.pr-shell').classList.toggle('is-comment', comment);
@@ -1201,6 +1213,7 @@ export function mountPianoRoll(rootEl, opts = {}) {
         setChannel(channel) {
             state.channel = channel;
         },
+        refreshChannelMute,
         refresh() {
             refreshHeader();
             resetViewport();
