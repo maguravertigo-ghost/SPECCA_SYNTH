@@ -7,7 +7,7 @@ import { confirmAction } from '../ui/dialogs.js';
 import { instrumentFamily } from './instruments.js';
 import { log } from '../core/log.js';
 import { copyNotes, planPaste } from './noteClipboard.js';
-import { writePatternMIDI } from './exportMidi.js';
+import { writePatternMIDI, writePatternMixMIDI } from './exportMidi.js';
 import { getSequencer, initSynth, loadSong, applyChannelMix, bindMasterVolume } from '../core/synth.js';
 
 const NOTE_NAMES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
@@ -77,6 +77,7 @@ export function mountPianoRoll(rootEl, opts = {}) {
                 <span class="pr-sep"></span>
 				<span class="pr-sep"></span>
                 <button id="prMixerBtn" class="pr-t-btn" type="button" title="Project mixer" aria-label="Project mixer"><span class="material-icon" aria-hidden="true">tune</span></button>
+                <button id="prMixBtn" class="pr-t-btn active" type="button" aria-pressed="true" title="Hear the arrangement behind this pattern (respects channel mute)">MIX</button>
                 <button id="prHomeBtn" class="pr-t-btn" type="button" aria-label="To start" title="To start"><span class="material-icon" aria-hidden="true">skip_previous</span></button>
                 <button id="prPlayBtn" class="pr-t-btn" type="button" title="Play / pause" aria-label="Play / pause"><span class="material-icon" aria-hidden="true">play_arrow</span></button>
                 <button aria-label="Stop" id="prStopBtn" class="pr-t-btn" type="button" title="Stop"><span class="material-icon" aria-hidden="true">stop</span></button>
@@ -111,6 +112,7 @@ export function mountPianoRoll(rootEl, opts = {}) {
     const patternSelect = $('#prPatternSelect');
     const playBtn    = $('#prPlayBtn');
     const stopBtn    = $('#prStopBtn');
+    const mixBtn     = $('#prMixBtn');
     const loopBtn    = $('#prLoopBtn');
     const durGroup   = $('#prDurGroup');
     const clearBtn   = $('#prClearBtn');
@@ -137,12 +139,16 @@ export function mountPianoRoll(rootEl, opts = {}) {
         loading: false,
         pasteCursor: null,
         cursorTick: 0,
-        secondsPerTick: 0,
+        mixEnabled: true,
+        placementId: null,
+        anchorTick: 0,
+        clock: null,
     };
     let dpr = Math.max(1, window.devicePixelRatio || 1);
     let dirty = true;
     let rafId = 0;
     let hotReloadTimer = null;
+    let reloadPending = false;
     let playbackRequest = 0;
     let seekingUntil = 0;
     let clipboard = null;
@@ -460,8 +466,8 @@ export function mountPianoRoll(rootEl, opts = {}) {
             playBtn.firstElementChild.textContent = 'play_arrow';
             dirty = true;
         }
-        if (state.playing && !state.loading && !seq?.paused && state.secondsPerTick && performance.now() >= seekingUntil) {
-            state.cursorTick = Math.max(0, Math.min(loopTicks(), seq.currentTime / state.secondsPerTick));
+        if (state.playing && !state.loading && !seq?.paused && state.clock && performance.now() >= seekingUntil) {
+            state.cursorTick = Math.max(0, Math.min(loopTicks(), state.clock.toTicks(seq.currentTime)));
         }
         if (state.visible && (dirty || state.playing)) {
             canvas.dataset.playheadTick = String(Math.round(state.cursorTick));
@@ -528,32 +534,46 @@ export function mountPianoRoll(rootEl, opts = {}) {
         dirty = true;
         if (hotReloadTimer) clearTimeout(hotReloadTimer);
         hotReloadTimer = setTimeout(() => {
-            if (!state.playing) return;
-            if (!getPattern()?.notes.length) stop();
-            else pushToSequencer(true).catch(err => log(`hot-reload failed: ${err}`, 'error'));
+            if (state.loading) reloadPending = true;
+            else if (state.playing) pushToSequencer(true);
         }, 200);
     };
 
     const pushToSequencer = async (keepPlaying = false) => {
         const seq = getSeq();
         const pattern = getPattern();
-        if (isComment() || !seq || !pattern?.notes.length || !state.visible || rootEl.inert || state.loading) return;
+        if (isComment() || !seq || !pattern || !state.visible || rootEl.inert || state.loading) return;
         const request = ++playbackRequest;
         state.loading = playBtn.disabled = true;
         try {
+            const mix = state.mixEnabled;
+            const options = { liveMix: true };
+            const placement = seq.arrangement.find(p => p.id === state.placementId && p.patternId === pattern.id)
+                ?? seq.arrangement.filter(p => p.patternId === pattern.id).reduce((first, p) => !first || p.startTick < first.startTick ? p : first, null);
+            const soloAt = placement?.startTick ?? state.anchorTick;
+            const { startTick, midi } = mix ? writePatternMixMIDI(seq, pattern.id, { ...options, placementId: state.placementId, anchorTick: state.anchorTick })
+                : { startTick: soloAt, midi: pattern.notes.length ? writePatternMIDI(seq, pattern.id, soloAt, options) : null };
+            if (!midi) {
+                if (state.playing) stop(false);
+                $('#prEditStatus').textContent = mix ? 'No notes in this part of the arrangement.' : 'No notes in this pattern.';
+                return;
+            }
             await initSynth();
             if (request !== playbackRequest) return;
             const sequencer = getSequencer();
-            const startTick = seq.arrangement.find(p => p.patternId === pattern.id)?.startTick ?? 0;
-            const midi = writePatternMIDI(seq, pattern.id, startTick, { liveMix: true });
             if (!await loadSong(midi, pattern.name, sequencer, () => request === playbackRequest && state.visible && !rootEl.inert)) return;
             applyChannelMix(seq);
             sequencer.loopCount = state.loopEnabled ? Infinity : 0;
-            state.secondsPerTick = 60 / (seq.tempoAt(startTick) * seq.timeDivision);
+            const secondsPerTick = 60 / (seq.tempoAt(startTick) * seq.timeDivision);
+            const origin = seq.ticksToSeconds(startTick);
+            state.clock = mix ? {
+                toSeconds: tick => seq.ticksToSeconds(startTick + tick) - origin,
+                toTicks: seconds => seq.secondsToTicks(origin + seconds) - startTick,
+            } : { toSeconds: tick => tick * secondsPerTick, toTicks: seconds => seconds / secondsPerTick };
 
             if (keepPlaying || state.playing) {
                 if (state.cursorTick >= loopTicks()) state.cursorTick = 0;
-                if (state.cursorTick > 0) sequencer.currentTime = Math.min(sequencer.duration, state.cursorTick * state.secondsPerTick);
+                if (state.cursorTick > 0) sequencer.currentTime = Math.min(sequencer.duration, state.clock.toSeconds(state.cursorTick));
                 seekingUntil = performance.now() + 100;
                 sequencer.play();
                 state.playing = true;
@@ -563,7 +583,10 @@ export function mountPianoRoll(rootEl, opts = {}) {
         } catch (err) {
             if (request === playbackRequest) { $('#prEditStatus').textContent = err.message; log(`Pattern play: ${err}`, 'error'); }
         } finally {
-            if (request === playbackRequest) state.loading = playBtn.disabled = false;
+            if (request === playbackRequest) {
+                state.loading = playBtn.disabled = false;
+                if (reloadPending) { reloadPending = false; scheduleHotReload(); }
+            }
         }
     };
 
@@ -574,6 +597,8 @@ export function mountPianoRoll(rootEl, opts = {}) {
         if (rewind) state.cursorTick = 0;
         state.loading = playBtn.disabled = false;
         clearTimeout(hotReloadTimer);
+        reloadPending = false;
+        state.clock = null;
         const sequencer = getSequencer?.();
         if (sequencer) {
             try { sequencer.pause(); if (rewind) sequencer.currentTime = 0; } catch {}
@@ -596,9 +621,9 @@ export function mountPianoRoll(rootEl, opts = {}) {
         if (!getPattern()) return;
         state.cursorTick = Math.max(0, Math.min(loopTicks(), Math.round(tick)));
         const seq = getSequencer();
-        if (seq && state.playing && !state.loading && state.secondsPerTick) {
+        if (seq && state.playing && !state.loading && state.clock) {
             seekingUntil = performance.now() + 100;
-            seq.currentTime = Math.min(seq.duration, state.cursorTick * state.secondsPerTick);
+            seq.currentTime = Math.min(seq.duration, state.clock.toSeconds(state.cursorTick));
         }
         if (reveal) {
             const x = stepToX(state.cursorTick / stepTicks());
@@ -611,7 +636,10 @@ export function mountPianoRoll(rootEl, opts = {}) {
         dirty = true;
     };
     $('#prHomeBtn').addEventListener('click', () => seekTick(0, true));
-    $('#prEndBtn').addEventListener('click', () => seekTick(loopTicks(), true));
+    $('#prEndBtn').addEventListener('click', () => {
+        if (state.playing || state.loading) stop(false);
+        seekTick(loopTicks(), true);
+    });
 
     // ------------------------------------------------------------------
     // Hit test
@@ -1101,6 +1129,16 @@ export function mountPianoRoll(rootEl, opts = {}) {
 
     playBtn?.addEventListener('click', togglePlay);
     $('#prMixerBtn').addEventListener('click', () => onMixer?.());
+    mixBtn.addEventListener('click', () => {
+        state.mixEnabled = !state.mixEnabled;
+        mixBtn.classList.toggle('active', state.mixEnabled);
+        mixBtn.setAttribute('aria-pressed', String(state.mixEnabled));
+        const resume = state.playing || state.loading;
+        if (resume) {
+            stop(false);
+            play();
+        }
+    });
     stopBtn?.addEventListener('click', () => stop());
     loopBtn?.addEventListener('click', () => {
         state.loopEnabled = !state.loopEnabled;
@@ -1230,8 +1268,10 @@ export function mountPianoRoll(rootEl, opts = {}) {
     return {
 		root: rootEl,
         getChannel: () => state.channel,
-        setChannel(channel) {
+        setChannel(channel, placement) {
             state.channel = channel;
+            state.placementId = placement?.id ?? null;
+            state.anchorTick = placement?.startTick ?? 0;
         },
         refreshChannelMute,
         refresh() {

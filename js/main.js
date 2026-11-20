@@ -233,10 +233,10 @@ if (arrangerRoot) {
         onSelectPattern: (channel, id) => selectedPatterns.set(channel, id),
         onEdit: commitEdit,
         onMixer: showProjectMixer,
-        onOpenChannel: (channel, patternId) => {
+        onOpenChannel: (channel, patternId, placement) => {
             if (patternId) selectedPatterns.set(channel, patternId);
             if (!currentSequence.getChannelPattern(channel)) { currentSequence.ensureChannelPattern(channel); commitEdit(); }
-            pianoRoll?.setChannel(channel);
+            pianoRoll?.setChannel(channel, placement);
             showPianoRoll();
         },
     });

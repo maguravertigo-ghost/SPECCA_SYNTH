@@ -14,7 +14,7 @@ function gsMessage(part, parameter, value) {
 const gsPart = channel => channel === 9 ? 0 : channel < 9 ? channel + 1 : channel;
 const marker = text => [0xff, 0x06, text.length, ...Array.from(text, c => c.charCodeAt(0))];
 
-function writeSequence(sequence, clips, { loop = null, respectMute = false, liveMix = false, previewAt = null, splitTracks = false } = {}) {
+function writeSequence(sequence, clips, { loop = null, respectMute = false, liveMix = false, previewAt = null, tempoWindow = false, splitTracks = false } = {}) {
     const meta = [];
     const parts = new Map();
     const trackKey = lane => splitTracks ? lane : Math.floor(lane / 16);
@@ -76,8 +76,9 @@ function writeSequence(sequence, clips, { loop = null, respectMute = false, live
         return [0xff, 0x51, 3, micros >> 16, (micros >> 8) & 0xff, micros & 0xff];
     };
     emit(0, -9, tempoEvent(previewAt === null ? sequence.tempo : sequence.tempoAt(previewAt)));
-    if (previewAt === null) for (const change of sequence.tempoChanges ?? []) {
-        if (change.tick > 0 && change.tick <= endTick) emit(change.tick, -9, tempoEvent(change.tempo));
+    if (previewAt === null || tempoWindow) for (const change of sequence.tempoChanges ?? []) {
+        const tick = change.tick - (tempoWindow ? previewAt : 0);
+        if (tick > 0 && tick <= endTick) emit(tick, -9, tempoEvent(change.tempo));
     }
     const ppq = Math.max(1, sequence.timeDivision || 480);
     const steps = sequence.stepsPerBar || 16;
@@ -124,6 +125,37 @@ export function writePatternMIDI(sequence, patternId, previewAt = 0, options = {
     const pattern = sequence.getPattern(patternId);
     if (!pattern) throw new Error('No pattern ' + patternId);
     return writeSequence(sequence, [{ pattern, startTick: 0, trim: true }], { loop: {}, respectMute: true, previewAt, ...options });
+}
+
+// Build a temporary, local-tick window of the arrangement. Clip crossing notes
+// at both edges; the original clips and patterns remain untouched.
+export function writePatternMixMIDI(sequence, patternId, { placementId, anchorTick = 0, ...options } = {}) {
+    const patterns = new Map(sequence.patterns.map(p => [p.id, p]));
+    const pattern = patterns.get(patternId);
+    if (!pattern) throw new Error('No pattern ' + patternId);
+    const matching = sequence.arrangement.filter(p => p.patternId === patternId);
+    const placement = matching.find(p => p.id === placementId)
+        ?? matching.reduce((first, p) => !first || p.startTick < first.startTick ? p : first, null);
+    const startTick = placement?.startTick ?? Math.max(0, Math.round(anchorTick));
+    const endTick = startTick + pattern.lengthTicks;
+    const visual = new Set(sequence.channels.filter(c => c.kind === 'comment').map(c => c.channel));
+    const clips = [];
+    const add = (p, start) => {
+        if (!p || visual.has(p.channel) || start >= endTick || start + p.lengthTicks <= startTick) return;
+        const notes = [];
+        for (const n of p.notes) {
+            const onset = start + Math.max(0, Math.round(n.tick));
+            const release = Math.min(start + p.lengthTicks, onset + Math.max(1, Math.round(n.dur)));
+            const first = Math.max(startTick, onset), last = Math.min(endTick, release);
+            if (last > first) notes.push({ ...n, tick: first - startTick, dur: last - first });
+        }
+        if (notes.length) clips.push({ startTick: 0, trim: true, pattern: { channel: p.channel, lengthTicks: pattern.lengthTicks, notes } });
+    };
+    for (const clip of sequence.arrangement) add(patterns.get(clip.patternId), clip.startTick);
+    if (!placement) add(pattern, startTick);
+    return { startTick, midi: clips.length ? writeSequence(sequence, clips, {
+        previewAt: startTick, tempoWindow: true, loop: { end: pattern.lengthTicks }, respectMute: true, ...options,
+    }) : null };
 }
 
 export function writeArrangementMIDI(sequence, options) {

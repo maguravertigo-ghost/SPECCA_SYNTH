@@ -413,7 +413,7 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
         const clip = e.target.closest('.arr-clip');
         if (!clip || e.target.closest('.arr-clip-resize')) return;
         const placement = getSeq()?.arrangement.find(p => p.id === clip.dataset.placement);
-        if (placement) onOpenChannel?.(Number(clip.dataset.channel), placement.patternId);
+        if (placement) onOpenChannel?.(Number(clip.dataset.channel), placement.patternId, placement);
     });
 
     rows.addEventListener('pointerdown', (e) => {
