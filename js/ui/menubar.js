@@ -16,6 +16,10 @@ const ACTIONS = {
     'edit-paste':        'paste',
     'edit-delete':       'del',
 
+    'generate-compose':   'composeTrack',
+    'generate-variation': 'varyTrack',
+    'generate-recompose': 'recomposeTrack',
+
     'player-open':       'openPlayer',
     'player-save-playlist':  'savePlaylist',
     'player-clear-playlist': 'clearPlaylist',
@@ -54,7 +58,7 @@ export function mountMenubar(handlers = {}) {
             if (!action) return;
             const fn = handlers[action];
             if (typeof fn === 'function') {
-                try { fn(); }
+                try { Promise.resolve(fn()).catch(err => log(`Menu [${action}] failed: ${err}`, 'error')); }
                 catch (err) { log(`Menu [${action}] failed: ${err}`, 'error'); }
             } else {
                 log(`Menu [${action}] — not wired yet`, 'warn');

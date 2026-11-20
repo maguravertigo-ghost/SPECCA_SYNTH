@@ -5,6 +5,50 @@ const HARMONY = {
     minor: { scale: [0, 2, 3, 5, 7, 8, 10], progressions: [[0, 5, 2, 6], [0, 3, 5, 4], [0, 6, 5, 6], [0, 3, 6, 0]] },
 };
 
+// Diatonic chords are shared by the song generator and the Piano Roll.
+export const scaleTone = (tonic, mode, degree, base = 60) => {
+    const scale = (HARMONY[mode] ?? HARMONY.major).scale;
+    return base + ((Math.round(tonic) % 12 + 12) % 12) + scale[((degree % 7) + 7) % 7] + 12 * Math.floor(degree / 7);
+};
+
+export function voiceChord(tonic, mode, degree, previous = []) {
+    const chord = [0, 2, 4].map(i => scaleTone(tonic, mode, degree + i));
+    const voicings = [];
+    for (let octave = -1; octave <= 0; octave++) {
+        for (let inversion = 0; inversion < 3; inversion++) {
+            const v = chord.map((key, i) => key + 12 * (octave + (i < inversion ? 1 : 0))).sort((a, b) => a - b);
+            if (v[0] >= 50 && v[2] <= 79) voicings.push(v);
+        }
+    }
+    const target = previous.length ? previous : [57, 62, 67];
+    const cost = v => v.reduce((n, key, i) => n + Math.abs(key - target[i]), 0);
+    return voicings.reduce((best, v) => cost(v) < cost(best) ? v : best, voicings[0]);
+}
+
+// A recurring rhythmic motif: strong beats land on chord tones, weak beats can
+// step through the scale. The last phrase resolves instead of choosing at random.
+export function phraseNotes({ tonic, mode, degree, ticks, rhythm = [0, 4, 7, 10, 12],
+    contour = [0, 1, 2, 1, 0], answer = false, resolve = false, center = 73 }) {
+    const chord = [0, 2, 4];
+    const pulses = [...new Set([0, ...rhythm.filter(step => step >= 0 && step < 16)])].sort((a,b) => a-b);
+    const notes = [];
+    for (let i = 0; i < pulses.length; i++) {
+        const step = pulses[i];
+        const tick = Math.round(ticks * step / 16);
+        const next = Math.round(ticks * (pulses[i + 1] ?? 16) / 16);
+        if (tick >= next) continue;
+        const shape = contour[i % contour.length] + (answer ? 1 : 0);
+        const index = ((shape % 3) + 3) % 3;
+        const passing = step % 4 !== 0 && i > 0 && i < pulses.length - 1;
+        const offset = resolve ? 0 : chord[index] + (passing ? (index === 2 ? -1 : 1) : 0);
+        let key = scaleTone(tonic, mode, degree + offset);
+        key += 12 * Math.round((center - key) / 12);
+        if (resolve && i > 0) break;
+        notes.push({ key, tick, dur: Math.min(ticks - tick, Math.max(1, Math.round((resolve ? ticks : next - tick) * .86))), vel: step % 4 ? 77 : 96 });
+    }
+    return notes;
+}
+
 // Returns ordinary, editable MIDI notes. No network, synth or DOM dependencies.
 export function generatePatternNotes({ lengthTicks, ticksPerBar, stepsPerBar = 16, tonic = 0, mode = 'major',
     style = 'chords', isDrum = false, random = Math.random } = {}) {
@@ -33,20 +77,22 @@ export function generatePatternNotes({ lengthTicks, ticksPerBar, stepsPerBar = 1
             for (const beat of hat) add(beat === 14 && bar % 2 ? 46 : 42, at(beat), step * .65, beat % 4 ? 54 : 73);
         }
     } else {
-        const { scale, progressions } = mode === 'minor' ? HARMONY.minor : HARMONY.major;
+        const { progressions } = mode === 'minor' ? HARMONY.minor : HARMONY.major;
         const progression = choose(progressions);
-        const root = 60 + ((Math.round(tonic) % 12 + 12) % 12);
         // One-bar loops still get a change of harmony; longer patterns get one chord per bar.
         const span = lengthTicks <= ticksPerBar ? Math.max(1, Math.min(ticksPerBar, Math.round(steps / 2) * step)) : ticksPerBar;
         const variant = choose([[0, 1, 2, 1], [0, 2, 1, 2], [0, 1, 2, 0]]);
-        const scaleTone = degree => root + scale[degree % 7] + 12 * Math.floor(degree / 7);
         for (let start = 0, i = 0; start < lengthTicks; start += span, i++) {
             const degree = progression[i % progression.length];
-            const chord = [0, 2, 4].map(offset => scaleTone(degree + offset));
+            const chord = [0, 2, 4].map(offset => scaleTone(tonic, mode, degree + offset));
             // Keep a compact register over middle C while retaining the chord's three pitch classes.
             const voicing = chord.map(key => key > 78 ? key - 12 : key).sort((a, b) => a - b);
             const available = Math.min(span, lengthTicks - start);
-            if (style === 'arpeggio') {
+            if (style === 'melody') {
+                for (const note of phraseNotes({ tonic, mode, degree, ticks: available, contour: variant, answer: i % 4 === 2 })) {
+                    add(note.key, start + note.tick, note.dur, note.vel);
+                }
+            } else if (style === 'arpeggio') {
                 const pulse = Math.max(1, step * 2);
                 for (let j = 0; j * pulse < available; j++) add(voicing[variant[j % variant.length]], start + j * pulse, Math.min(pulse * .82, available - j * pulse), j ? 84 : 100);
             } else {

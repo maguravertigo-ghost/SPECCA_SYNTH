@@ -24,7 +24,7 @@ export function chooseGeneratedNotes({ isDrum, hasNotes, defaults = {} }) {
             fields.mode.value = defaults.mode ?? 'major';
         }
         const rhythms = isDrum ? [['Straight', 'straight'], ['Syncopated', 'syncopated'], ['Half-time', 'half-time']]
-            : [['Chords', 'chords'], ['Arpeggio', 'arpeggio'], ['Syncopated chords', 'syncopated']];
+            : [['Chords', 'chords'], ['Melody', 'melody'], ['Arpeggio', 'arpeggio'], ['Syncopated chords', 'syncopated']];
         fields.style.replaceChildren(...rhythms.map(args => new Option(...args)));
         if (rhythms.some(([, value]) => defaults.style === value)) fields.style.value = defaults.style;
         dialog.addEventListener('close', () => {

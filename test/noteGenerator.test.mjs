@@ -42,3 +42,12 @@ test('append preserves existing notes and skips only same-pitch overlaps', () =>
     assert.deepEqual(withoutNoteConflicts(generated, existing), [generated[0], generated[3], generated[4]]);
     assert.equal(existing[0].dur, 10);
 });
+
+
+test('Piano Roll Melody uses a monophonic, in-key phrase in each chord span', () => {
+    const notes = generatePatternNotes({ ...base, tonic: 5, mode: 'minor', style: 'melody' });
+    assert.ok(notes.length > 6);
+    assert.ok(inRange(notes, base.lengthTicks));
+    assert.ok(notes.every((n, i) => [0, 2, 3, 5, 7, 8, 10].includes((n.key - 5) % 12) &&
+        (i === 0 || n.tick >= notes[i - 1].tick + notes[i - 1].dur)));
+});

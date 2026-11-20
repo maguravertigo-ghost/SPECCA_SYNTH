@@ -8,7 +8,8 @@ import { mountPianoRoll } from './editor/pianoRoll.js';
 import { importMidi } from './editor/importMidi.js';
 import { adaptToSoundfont } from './editor/instruments.js';
 import { writeArrangementMIDI } from './editor/exportMidi.js';
-import { askName } from './ui/dialogs.js';
+import { askName, confirmAction } from './ui/dialogs.js';
+import { openTrackGenerator } from './ui/trackGeneratorDialog.js';
 import { openMixer } from './ui/mixer.js';
 import { createEditHistory } from './editor/history.js';
 import { Sequence } from './editor/sequence.js';
@@ -83,10 +84,13 @@ function refreshProjectTempo() {
     output.value = Number.isFinite(tempo) ? String(Number(tempo.toFixed(2))) : '–';
 }
 
-function useSequence(sequence, name = null) {
+function useSequence(sequence, name = null, { keepHistory = false } = {}) {
+    arrangerView?.stop();
     currentSequence = sequence;
     refreshProjectTempo();
-    history.reset(sequence.toJSON(0)); syncHistory();
+    if (keepHistory) history.commit(sequence.toJSON(0));
+    else history.reset(sequence.toJSON(0));
+    syncHistory();
     lastLoadedName = name;
     selectedPatterns.clear();
     pianoRoll?.setChannel(null);
@@ -258,6 +262,7 @@ const saveProjectToLocal = async () => {
     catch (error) { log(`Save failed: ${error}`, 'error'); setStatus('Could not save project'); return; }
     log(`main: project saved "${name}"`);
     setStatus(`Saved: ${name}`);
+    return true;
 };
 
 const openProjectDialog = () => {
@@ -300,6 +305,22 @@ const openProjectDialog = () => {
     });
 };
 
+async function generateProject(type) {
+    const previous = currentSequence;
+    if (previous?.patterns.length || previous?.arrangement.length) {
+        if (!await confirmAction('Save before generating?',
+            'The generator will create a new project. Save your current project locally before opening the generator.', 'Save and continue')) return;
+        if (currentSequence !== previous || !await saveProjectToLocal()) return;
+    }
+    if (currentSequence !== previous) return;
+    const sequence = await openTrackGenerator(type);
+    if (!sequence || currentSequence !== previous) return;
+    adaptToSoundfont(sequence, getSynth()?.soundBankManager.presetList);
+    useSequence(sequence, null, { keepHistory: true });
+    setStatus(`Generated: ${sequence.name}`);
+    log(`Generated ${sequence.name} — ${sequence.arrangement.length} editable clips`);
+}
+
 // ---------------- Menubar ----------------
 menubar = mountMenubar({
     new: () => {
@@ -321,6 +342,9 @@ menubar = mountMenubar({
     openProject: openProjectDialog,
     open: () => document.getElementById('openMidiInput')?.click(),
 
+    composeTrack: () => generateProject('compose'),
+    varyTrack: () => generateProject('variation'),
+    recomposeTrack: () => generateProject('recompose'),
     save: saveProjectToLocal,
     saveAs: () => {
         log('Menu: Save As MIDI…');
