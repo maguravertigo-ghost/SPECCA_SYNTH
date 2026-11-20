@@ -14,13 +14,13 @@ function gsMessage(part, parameter, value) {
 const gsPart = channel => channel === 9 ? 0 : channel < 9 ? channel + 1 : channel;
 const marker = text => [0xff, 0x06, text.length, ...Array.from(text, c => c.charCodeAt(0))];
 
-function writeSequence(sequence, clips, { loop = null, respectMute = false, liveMix = false, previewAt = null, tempoWindow = false, splitTracks = false } = {}) {
+function writeSequence(sequence, clips, { loop = null, respectMute = false, liveMix = false, previewAt = null, tempoWindow = false, splitTracks = false, minimumEndTick = 0 } = {}) {
     const meta = [];
     const parts = new Map();
     const trackKey = lane => splitTracks ? lane : Math.floor(lane / 16);
     const active = new Set();
     const visual = new Set(sequence.channels.filter(c => c.kind === 'comment').map(c => c.channel));
-    let endTick = 0;
+    let endTick = minimumEndTick;
     const emit = (tick, order, data, part = null) => {
         let events = meta;
         if (part !== null) {
@@ -165,4 +165,36 @@ export function writeArrangementMIDI(sequence, options) {
         if (pattern) clips.push({ pattern, startTick: placement.startTick });
     }
     return writeSequence(sequence, clips, options);
+}
+
+export function writeChannelMIDIFiles(sequence) {
+    const patterns = new Map(sequence.patterns.map(p => [p.id, p]));
+    const channels = sequence.orderedChannels().filter(c => c.kind !== 'comment');
+    const byLane = new Map(channels.map(c => [c.channel, []]));
+    let endTick = 0;
+    for (const clip of sequence.arrangement) {
+        const pattern = patterns.get(clip.patternId);
+        const list = byLane.get(pattern?.channel);
+        if (!list || !pattern.notes.length) continue;
+        list.push({ pattern, startTick: clip.startTick });
+        endTick = Math.max(endTick, clip.startTick + pattern.lengthTicks);
+    }
+    const files = [];
+    for (const ch of channels) {
+        const placed = byLane.get(ch.channel);
+        if (!placed.length) continue;
+        // Each file is independently playable: remap percussion to MIDI Ch. 10
+        // and melodic instruments to Ch. 1. Offsets remain relative to song start.
+        const lane = ch.isDrum ? 9 : 0;
+        const part = { ...sequence, channels: [{ ...ch, channel: lane }], tempoAt: sequence.tempoAt.bind(sequence) };
+        const remapped = new Map();
+        const clips = placed.map(({ pattern, startTick }) => {
+            if (!remapped.has(pattern.id)) remapped.set(pattern.id, { ...pattern, channel: lane, notes: pattern.notes.map(n => ({ ...n, track: lane })) });
+            return { pattern: remapped.get(pattern.id), startTick };
+        });
+        const name = (ch.name || `Channel ${ch.channel + 1}`).replace(/[<>:"/\\|?*\u0000-\u001f]+/g, '_').trim().replace(/[. ]+$/, '').slice(0, 80) || 'Channel';
+        files.push({ name: `${String(files.length + 1).padStart(2, '0')} - ${name}.mid`,
+            data: writeSequence(part, clips, { splitTracks: true, minimumEndTick: endTick }) });
+    }
+    return files;
 }

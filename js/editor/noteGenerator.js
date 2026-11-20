@@ -60,9 +60,74 @@ export function euclideanPulses(steps, hits, rotation = 0) {
         .filter(i => (((i - rotation + steps) % steps) * hits) % steps < hits);
 }
 
+// Positions are sixteenths of a 4/4 bar, mapped onto the project's grid.
+const eighths = [0, 2, 4, 6, 8, 10, 12, 14];
+const offbeats = [2, 6, 10, 14];
+const grooves = {
+    straight: ['Straight / Pop', [[0, 8], [0, 8, 10]], [4, 12], eighths],
+    syncopated: ['Syncopated', [[0, 3, 8, 11], [0, 6, 8, 14]], [4, 12], [0, 2, 4, 7, 8, 10, 12, 14, 15]],
+    'half-time': ['Half-time', [[0, 6, 11], [0, 4, 14]], [8], eighths],
+    euclidean: ['Euclidean', [euclideanPulses(16, 5)], [4, 12], euclideanPulses(16, 7)],
+    dnb: ['Drum & Bass', [[0, 7, 10], [0, 3, 10, 14]], [4, 12], [0, 2, 3, 6, 8, 9, 10, 14, 15], { ghosts: [5, 11], open: [6, 14] }],
+    techno: ['Techno', [[0, 4, 8, 12]], [4, 12], [0, 2, 4, 6, 8, 10, 12, 14, 15], { open: offbeats, snareKey: 39 }],
+    house: ['House', [[0, 4, 8, 12]], [4, 12], [2, 4, 6, 8, 10, 12, 14], { open: offbeats, percussion: [[54, [0, 4, 8, 12]]] }],
+    rnb: ['R&B / Neo-soul', [[0, 6, 10, 15], [0, 3, 9, 14]], [4, 12], [0, 2, 5, 7, 8, 10, 13, 15], { ghosts: [3, 11], soft: true, snareKey: 37 }],
+    hiphop: ['Hip-hop / Boom bap', [[0, 7, 8, 11], [0, 3, 8, 10]], [4, 12], eighths, { ghosts: [15] }],
+    trap: ['Trap', [[0, 3, 10, 14], [0, 6, 7, 13]], [8], [0, 2, 4, 6, 8, 10, 12, 13, 14, 15], { open: [6] }],
+    rock: ['Rock', [[0, 6, 8], [0, 2, 8, 10]], [4, 12], eighths, { open: [14] }],
+    metal: ['Metal', [[0, 1, 2, 3, 8, 9, 10, 11], [0, 2, 6, 7, 8, 10, 14, 15]], [4, 12], eighths, { percussion: [[51, [0, 4, 8, 12]]] }],
+    funk: ['Funk', [[0, 3, 6, 10, 14], [0, 6, 8, 11, 14]], [4, 12], [0, 1, 2, 4, 6, 7, 8, 10, 12, 14, 15], { ghosts: [2, 9, 13], open: [7] }],
+    disco: ['Disco', [[0, 4, 8, 12]], [4, 12], eighths, { open: offbeats, percussion: [[54, eighths]] }],
+    reggae: ['Reggae / One drop', [[8]], [8], offbeats, { soft: true, snareKey: 37 }],
+    latin: ['Latin / Clave', [[0, 6, 12]], [8], offbeats, { percussion: [[75, [0, 6, 12, 8, 10]], [64, [3, 7, 11, 15]]] }],
+    jazz: ['Jazz / Swing', [[0, 8]], [4, 12], [0, 4, 7, 8, 12, 15], { ghosts: [7, 15], soft: true, hatKey: 51 }],
+};
+export const DRUM_GROOVES = Object.entries(grooves).map(([id, [label]]) => [label, id]);
+export const DRUM_SECTIONS = [['Full groove', 'main'], ['Intro', 'intro'], ['Breakdown', 'breakdown'], ['Transition / Fill', 'fill'], ['Ending', 'ending']];
+
+function buildDrums({ style, section, random, lengthTicks, ticksPerBar, steps, step, add }) {
+    const [, kicks, snares, hats, extra = {}] = grooves[style] ?? grooves.straight;
+    const { ghosts = [], open = [], snareKey = 38, hatKey = 42, soft = false } = extra;
+    for (let start = 0, bar = 0; start < lengthTicks; start += ticksPerBar, bar++) {
+        const final = start + ticksPerBar >= lengthTicks;
+        const at = beat => start + Math.min(ticksPerBar - 1, Math.min(steps - 1, Math.round(steps * beat / 16)) * step);
+        const hit = (key, beat, vel, duration = step) => add(key, at(beat), duration, soft ? Math.round(vel * .88) : vel);
+        if (section === 'ending' && final) {
+            hit(36, 0, 112); hit(49, 0, 104, Math.min(ticksPerBar / 2, lengthTicks - start));
+            continue;
+        }
+        const fill = section === 'fill' && final;
+        const breakDown = section === 'breakdown';
+        const intro = section === 'intro';
+        const available = Math.min(ticksPerBar, lengthTicks - start);
+        const cutoff = fill ? 8 * available / ticksPerBar : 16;
+        const kick = kicks[Math.floor(random() * kicks.length)];
+        for (const beat of (intro ? kick.slice(0, 1) : breakDown ? [] : kick)) if (beat < cutoff) hit(36, beat, beat ? 93 : 110);
+        for (const beat of (intro ? [] : breakDown ? [8] : snares)) if (beat < cutoff) hit(snareKey, beat, breakDown ? 82 : 100);
+        const cymbals = style === 'euclidean' ? euclideanPulses(16, 7, bar % 2) : hats;
+        for (const [i, beat] of cymbals.entries()) {
+            if (beat >= cutoff || ((intro || breakDown) && i % 2)) continue;
+            const key = open.includes(beat) || (hatKey === 42 && beat === 14 && bar % 2 && !intro && !breakDown) ? 46 : hatKey;
+            hit(key, beat, beat % 4 ? 54 : 73, step * .65);
+        }
+        if (!intro && !breakDown) {
+            for (const beat of ghosts) if (beat < cutoff) hit(snareKey, beat, 47, step * .55);
+            for (const [key, beats] of extra.percussion ?? []) for (const beat of beats) if (beat < cutoff) hit(key, beat, 66);
+        }
+        if (fill) {
+            const roll = style === 'dnb' || style === 'trap' || style === 'metal' ? [8, 10, 11, 12, 13, 14, 15] : [8, 10, 12, 13, 15];
+            roll.forEach((beat, i) => {
+                const tick = start + Math.min(available - 1, Math.floor(available * beat / 16));
+                const key = i < 2 ? snareKey : [50, 47, 45][Math.min(2, i - 2)];
+                add(key, tick, Math.min(step, available / 8), Math.min(112, 77 + 6 * i));
+            });
+        }
+    }
+}
+
 // Returns ordinary, editable MIDI notes. No network, synth or DOM dependencies.
 export function generatePatternNotes({ lengthTicks, ticksPerBar, stepsPerBar = 16, tonic = 0, mode = 'major',
-    style = 'chords', isDrum = false, random = Math.random } = {}) {
+    style = 'chords', section = 'main', isDrum = false, random = Math.random } = {}) {
     if (!Number.isSafeInteger(lengthTicks) || lengthTicks < 1 || !Number.isSafeInteger(ticksPerBar) || ticksPerBar < 1) return [];
     const steps = Math.max(1, Math.round(stepsPerBar));
     const step = Math.max(1, Math.round(ticksPerBar / steps));
@@ -77,16 +142,7 @@ export function generatePatternNotes({ lengthTicks, ticksPerBar, stepsPerBar = 1
     const choose = array => array[Math.floor(random() * array.length)];
 
     if (isDrum) {
-        for (let start = 0, bar = 0; start < lengthTicks; start += ticksPerBar, bar++) {
-            const at = fraction => start + Math.min(ticksPerBar - 1, Math.min(steps - 1, Math.round(steps * fraction / 16)) * step);
-            const kick = style === 'euclidean' ? euclideanPulses(16, 5) : style === 'syncopated' ? choose([[0, 3, 8, 11], [0, 6, 8, 14]])
-                : style === 'half-time' ? choose([[0, 6, 11], [0, 4, 14]]) : choose([[0, 8], [0, 8, 10]]);
-            const snare = style === 'half-time' ? [8] : [4, 12];
-            const hat = style === 'euclidean' ? euclideanPulses(16, 7, bar % 2) : style === 'syncopated' ? [0, 2, 4, 7, 8, 10, 12, 14, 15] : [0, 2, 4, 6, 8, 10, 12, 14];
-            for (const beat of kick) add(36, at(beat), step, beat ? 93 : 110);
-            for (const beat of snare) add(38, at(beat), step, 100);
-            for (const beat of hat) add(beat === 14 && bar % 2 ? 46 : 42, at(beat), step * .65, beat % 4 ? 54 : 73);
-        }
+        buildDrums({ style, section, random, lengthTicks, ticksPerBar, steps, step, add });
     } else {
         const { progressions } = mode === 'minor' ? HARMONY.minor : HARMONY.major;
         const progression = choose(progressions);

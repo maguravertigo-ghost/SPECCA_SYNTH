@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { euclideanPulses, generatePatternNotes, withoutNoteConflicts } from '../js/editor/noteGenerator.js';
+import { DRUM_GROOVES, DRUM_SECTIONS, euclideanPulses, generatePatternNotes, withoutNoteConflicts } from '../js/editor/noteGenerator.js';
 
 const base = { lengthTicks: 1920, ticksPerBar: 1920, stepsPerBar: 16, random: () => 0 };
 const inRange = (notes, length) => notes.every(n => Number.isInteger(n.tick) && Number.isInteger(n.dur) &&
@@ -63,4 +63,21 @@ test('Euclidean pulses fill the cycle evenly and rotate without changing hit cou
     const groove = generatePatternNotes({ ...base, isDrum: true, style: 'euclidean' });
     assert.equal(groove.filter(n => n.key === 36).length, 5);
     assert.equal(groove.filter(n => [42, 46].includes(n.key)).length, 7);
+});
+
+
+test('genre grooves use distinct MIDI rhythms and every section stays within a partial final bar', () => {
+    const groove = style => generatePatternNotes({ ...base, style, isDrum: true });
+    const kicks = style => groove(style).filter(n => n.key === 36).map(n => n.tick);
+    assert.deepEqual(kicks('techno'), [0, 480, 960, 1440]);
+    assert.deepEqual(kicks('dnb'), [0, 840, 1200]);
+    assert.deepEqual(kicks('rnb'), [0, 720, 1200, 1800]);
+    const lengthTicks = 2600;
+    for (const [, style] of DRUM_GROOVES) for (const [, section] of DRUM_SECTIONS) {
+        const notes = generatePatternNotes({ ...base, lengthTicks, isDrum: true, style, section });
+        assert.ok(inRange(notes, lengthTicks));
+        if (section === 'fill') assert.ok(notes.some(n => [45, 47, 50].includes(n.key) && n.tick > 2240));
+        if (section === 'ending') assert.deepEqual(notes.filter(n => n.tick >= 1920).map(n => n.key), [36, 49]);
+        if (section === 'breakdown') assert.ok(!notes.some(n => n.key === 36));
+    }
 });

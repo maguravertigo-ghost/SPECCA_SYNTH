@@ -1,5 +1,5 @@
 import { Sequence } from './sequence.js';
-import { TONICS, generatePatternNotes, phraseNotes, scaleTone, voiceChord } from './noteGenerator.js';
+import { TONICS, DRUM_GROOVES, generatePatternNotes, phraseNotes, scaleTone, voiceChord } from './noteGenerator.js';
 
 export const TRACK_STYLES = {
     pop: { title: 'Pop', bpm: 110, groove: 'straight', kit: [0, 0, 33, 0], rhythm: [0, 3, 6, 8, 12] },
@@ -39,7 +39,7 @@ export function generateTrack({ type = 'compose', source = null, sourceUse = 'no
     }
     if (type === 'variation') return varyMIDI(source, sourceUse, random);
     const motif = type === 'compose' && source ? readMotif(source, sourceUse) : {};
-    const context = { preset, phrasesForStyle, tonic, mode, random, motif, evolution, groove: groove === 'euclidean' ? groove : preset.groove };
+    const context = { preset, phrasesForStyle, tonic, mode, random, motif, evolution, groove: DRUM_GROOVES.some(([, id]) => id === groove) ? groove : preset.groove };
     if (type === 'recompose') return recomposeMIDI(source, context);
 
     bars = Math.ceil(integer(bars, 16, 8, 64) / 4) * 4;

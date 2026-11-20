@@ -10,19 +10,21 @@
 <body>
 
 <header class="menubar">
-    <div class="menubar-logo"><span class="material-icon" aria-hidden="true">piano</span> <span>SPESSA</span><small class="app-version">v1.7.0</small></div>
+    <div class="menubar-logo"><span class="material-icon" aria-hidden="true">piano</span> <span>SPESSA</span><small class="app-version">v1.8.0</small></div>
     <nav class="menubar-menus">
         <div class="menu" data-menu="file">
             <button class="menu-btn" type="button">File</button>
             <div class="menu-dropdown">
                 <button data-action="file-new">New Project</button>
                 <button data-action="file-open">Open MIDI…</button>
+                <button data-action="file-import-channels">Import MIDI as channels…</button>
                 <button data-action="file-open-project">Open Project…</button>
 				<button data-action="file-project-settings">Project Settings…</button>
                 <div class="menu-sep"></div>
                 <button data-action="file-save">Save</button>
                 <button data-action="file-save-as">Save As MIDI…</button>
-                <button data-action="file-save-tracks">Export MIDI (separate tracks)…</button>
+                <button data-action="file-save-tracks">Export one MIDI (separate tracks)…</button>
+                <button data-action="file-save-channel-files">Export MIDI by channel (ZIP)…</button>
             </div>
         </div>
         <div class="menu" data-menu="edit">
@@ -158,6 +160,7 @@
     <form method="dialog" class="arr-dialog-footer"><button class="btn" value="later">Edit without sound</button></form>
 </dialog>
 <input id="localSoundFont" type="file" hidden accept=".sf2,.sf3">
+<input id="importMidiChannelsInput" type="file" hidden multiple accept=".mid,.midi,audio/midi,audio/x-midi">
 <input id="openMidiInput" type="file" hidden accept=".mid,.midi,.rmi,.xmf,.mod,.s3m,.xm,.it">
 <script type="module" src="./js/main.js"></script>
 </body>

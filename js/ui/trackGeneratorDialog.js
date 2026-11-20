@@ -1,5 +1,5 @@
 import { importMidi } from '../editor/importMidi.js';
-import { TONICS } from '../editor/noteGenerator.js';
+import { TONICS, DRUM_GROOVES } from '../editor/noteGenerator.js';
 import { generateTrack, TRACK_STYLES } from '../editor/trackGenerator.js';
 
 const MODES = {
@@ -23,7 +23,7 @@ export function openTrackGenerator(type) {
                     <label class="arr-field"><span>Key</span><select name="tonic"></select></label>` : ''}
                 ${type !== 'variation' ? `<label class="arr-field"><span>Development</span><select name="development"><option value="repeat">Repeat sections</option><option value="evolve">Evolving phrases</option></select></label>` : ''}
                 ${type === 'compose' ? `<label class="arr-field"><span>Instruments</span><select name="palette"><option value="style">Style preset</option><option value="piano">Piano & strings</option><option value="electric">Electric keys & guitar</option><option value="synth">Synths</option></select></label>
-                    <label class="arr-field"><span>Drum groove</span><select name="groove"><option value="style">Style preset</option><option value="euclidean">Euclidean</option></select></label>
+                    <label class="arr-field"><span>Drum groove</span><select name="groove"><option value="style">Style preset</option></select></label>
                     <label class="arr-field"><span>Length</span><select name="bars"><option value="8">8 bars · sketch</option><option value="16" selected>16 bars · short track</option><option value="32">32 bars</option><option value="64">64 bars</option></select></label>
                     <label class="arr-field"><span>Tempo (BPM)</span><input type="number" name="bpm" required min="45" max="220" value="110"></label>` : ''}
                 ${type === 'compose' ? `<label class="arr-field"><span>Use MIDI for</span><select name="sourceUse"><option value="none">No source</option><option value="notes">Melody shape</option><option value="rhythm">Rhythm</option></select></label>` : ''}
@@ -38,6 +38,7 @@ export function openTrackGenerator(type) {
         const fields = form.elements;
         if (fields.style) fields.style.replaceChildren(...Object.entries(TRACK_STYLES).map(([id, p]) => new Option(p.title, id)));
         if (fields.tonic) fields.tonic.replaceChildren(...TONICS.map((name, i) => new Option(name, i)));
+        if (fields.groove) fields.groove.append(...DRUM_GROOVES.map(args => new Option(...args)));
         if (fields.bpm) fields.style.addEventListener('change', () => { fields.bpm.value = TRACK_STYLES[fields.style.value].bpm; });
         fields.seed.value = Math.floor(Math.random() * 4294967296);
         const wantsMIDI = () => type !== 'compose' || fields.sourceUse.value !== 'none';

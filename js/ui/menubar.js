@@ -4,11 +4,13 @@ import { log } from '../core/log.js';
 const ACTIONS = {
     'file-new':          'new',
     'file-open':         'open',
+    'file-import-channels': 'importChannels',
     'file-open-project': 'openProject',
 	'file-project-settings': 'projectSettings',
     'file-save':         'save',
     'file-save-as':      'saveAs',
     'file-save-tracks':  'saveTracks',
+    'file-save-channel-files': 'saveChannelFiles',
 
     'edit-undo':         'undo',
     'edit-redo':         'redo',

@@ -7,7 +7,9 @@ import { mountPlayerOverlay } from './ui/playerOverlay.js';
 import { mountPianoRoll } from './editor/pianoRoll.js';
 import { importMidi } from './editor/importMidi.js';
 import { adaptToSoundfont } from './editor/instruments.js';
-import { writeArrangementMIDI } from './editor/exportMidi.js';
+import { writeArrangementMIDI, writeChannelMIDIFiles } from './editor/exportMidi.js';
+import { appendMidiChannels } from './editor/appendMidiChannels.js';
+import { zipStoredFiles } from './core/zipStore.js';
 import { askName, confirmAction } from './ui/dialogs.js';
 import { openTrackGenerator } from './ui/trackGeneratorDialog.js';
 import { openMixer } from './ui/mixer.js';
@@ -327,24 +329,40 @@ async function generateProject(type) {
     log(`Generated ${sequence.name} — ${sequence.arrangement.length} editable clips`);
 }
 
+function downloadFile(data, type, name) {
+    const url = URL.createObjectURL(new Blob([data], { type }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 30000);
+}
+
 function exportProjectMidi(splitTracks) {
-    log('Menu: Save As MIDI…');
-    if (!currentSequence) { log('Save As: nothing to save', 'warn'); return; }
+    if (!currentSequence) return;
     try {
-        const midiBuf = writeArrangementMIDI(currentSequence, { splitTracks });
-        const blob = new Blob([midiBuf], { type: 'audio/midi' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        const base = currentSequence.name || 'untitled';
-        a.download = `${base.replace(/\.midi?$/i, '')}${splitTracks ? '-tracks' : ''}.mid`;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        URL.revokeObjectURL(url);
-        log(`Menu: saved ${a.download} (${midiBuf.byteLength} bytes)`);
-    } catch (err) {
-        log(`Save As failed: ${err}`, 'error');
+        const midi = writeArrangementMIDI(currentSequence, { splitTracks });
+        downloadFile(midi, 'audio/midi', `${midiBaseName()}${splitTracks ? '-tracks' : ''}.mid`);
+    } catch (error) {
+        log(`Save As MIDI failed: ${error}`, 'error');
+        setStatus(error.message);
+    }
+}
+
+const midiBaseName = () => (currentSequence.name || 'Untitled').replace(/\.midi?$/i, '');
+
+function exportChannelFiles() {
+    if (!currentSequence) return;
+    try {
+        const files = writeChannelMIDIFiles(currentSequence);
+        if (!files.length) { setStatus('No placed MIDI notes to export.'); return; }
+        downloadFile(zipStoredFiles(files), 'application/zip', `${midiBaseName()}-channels.zip`);
+        setStatus(`Exported ${files.length} MIDI channel file(s)`);
+    } catch (error) {
+        log(`MIDI ZIP export failed: ${error}`, 'error');
+        setStatus(error.message);
     }
 }
 
@@ -368,6 +386,7 @@ menubar = mountMenubar({
     },
     openProject: openProjectDialog,
     open: () => document.getElementById('openMidiInput')?.click(),
+    importChannels: () => document.getElementById('importMidiChannelsInput').click(),
 
     composeTrack: () => generateProject('compose'),
     varyTrack: () => generateProject('variation'),
@@ -375,6 +394,7 @@ menubar = mountMenubar({
     save: saveProjectToLocal,
     saveAs: () => exportProjectMidi(false),
     saveTracks: () => exportProjectMidi(true),
+    saveChannelFiles: exportChannelFiles,
 
     undo: () => restoreEdit('undo'),
     redo: () => restoreEdit('redo'),
@@ -440,6 +460,35 @@ midiInput?.addEventListener('change', async () => {
     catch (err) {
         log(`import failed: ${err}`, 'error');
         setStatus('Load failed');
+    }
+});
+
+const channelMidiInput = document.getElementById('importMidiChannelsInput');
+channelMidiInput.addEventListener('change', async () => {
+    const files = [...channelMidiInput.files];
+    channelMidiInput.value = '';
+    const project = currentSequence;
+    if (!files.length || !project) return;
+    try {
+        const sources = [];
+        for (const file of files) {
+            try { sources.push(importMidi(await file.arrayBuffer(), file.name)); }
+            catch { throw new Error(`Could not read ${file.name} as MIDI.`); }
+        }
+        if (currentSequence !== project) return;
+        const { sequence, count } = appendMidiChannels(project, sources);
+        if (!count) { setStatus('No notes in the selected MIDI files.'); return; }
+        // Adapt only the incoming channels, never the instruments already in the project.
+        const existing = new Set(project.orderedChannels().map(c => c.channel));
+        adaptToSoundfont({ channels: sequence.channels.filter(c => !existing.has(c.channel) && c.created !== false) }, getSynth()?.soundBankManager.presetList);
+        arrangerView?.stop();
+        currentSequence = sequence;
+        commitEdit();
+        showArranger();
+        setStatus(`Imported ${count} MIDI channel(s)`);
+    } catch (err) {
+        log(`Import MIDI channels failed: ${err}`, 'error');
+        setStatus(err.message);
     }
 });
 
