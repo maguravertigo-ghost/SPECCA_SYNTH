@@ -71,7 +71,7 @@ export function mountPianoRoll(rootEl, opts = {}) {
                     <span id="prChannelMute" role="status" aria-label="Current channel mute status" title="Current channel mute status" hidden></span>
                     <label class="pr-num" title="Master volume">
                         <span>Vol</span>
-                        <input id="prMasterVol" type="range" min="0" max="100" value="100" style="width:90px">
+                        <input id="prMasterVol" type="range" min="0" max="100" step="1" value="100" aria-label="Master volume"><output id="prMasterVolumeValue">100%</output>
                     </label>
                 </div>
                 <span class="pr-sep"></span>
@@ -171,7 +171,7 @@ export function mountPianoRoll(rootEl, opts = {}) {
     const stepsPerBar = () => getSeq()?.stepsPerBar || 16;
     const loopTicks = () => Math.max(1, getPattern()?.lengthTicks ?? getTimeDiv() * 4);
     const totalSteps = () => Math.ceil(loopTicks() / stepTicks());
-    const durTicks = () => Math.max(1, stepTicks() * state.durMult);
+    const durTicks = () => Math.max(1, Math.round(getTimeDiv() * state.durMult / 4));
 
     const layer = () => {
         const channel = getChannelInfo();
@@ -1108,19 +1108,29 @@ export function mountPianoRoll(rootEl, opts = {}) {
     // Dur buttons
     // ------------------------------------------------------------------
     const buildDurButtons = () => {
-        durGroup.innerHTML = '';
-        DUR_BUTTONS.forEach(d => {
+        durGroup.replaceChildren();
+        const extra = document.createElement('select');
+        extra.id = 'prNoteDuration';
+        extra.setAttribute('aria-label', 'Note duration');
+        const lengths = [['1/64', .25], ['1/32', .5], ['1/16 triplet', 2/3], ['1/16', 1], ['Dotted 1/16', 1.5],
+            ['1/8 triplet', 4/3], ['1/8', 2], ['Dotted 1/8', 3], ['1/4 triplet', 8/3], ['1/4', 4],
+            ['Dotted 1/4', 6], ['1/2', 8], ['Dotted 1/2', 12], ['Whole', 16], ['Dotted whole', 24]];
+        extra.replaceChildren(...lengths.map(([label, length]) => new Option(label, length)));
+        durGroup.append(extra);
+        const setDuration = length => {
+            state.durMult = length;
+            extra.value = String(length);
+            durGroup.querySelectorAll('button').forEach(x => x.classList.toggle('active', Number(x.dataset.mult) === length));
+        };
+        extra.addEventListener('change', () => setDuration(Number(extra.value)));
+        DUR_BUTTONS.filter(d => d.mult !== 1).forEach(d => {
             const b = document.createElement('button');
-            b.type = 'button';
-            b.className = 'pr-dur-btn' + (d.mult === state.durMult ? ' active' : '');
-            b.dataset.mult = d.mult;
-            b.textContent = d.label;
-            b.addEventListener('click', () => {
-                state.durMult = d.mult;
-                [...durGroup.children].forEach(x => x.classList.toggle('active', Number(x.dataset.mult) === state.durMult));
-            });
-            durGroup.appendChild(b);
+            b.type = 'button'; b.className = 'pr-dur-btn'; b.dataset.mult = d.mult; b.textContent = d.label;
+            b.title = `Duration: ${d.mult} grid steps`;
+            b.addEventListener('click', () => setDuration(d.mult));
+            durGroup.append(b);
         });
+        setDuration(state.durMult);
     };
 
     // ------------------------------------------------------------------
@@ -1249,7 +1259,7 @@ export function mountPianoRoll(rootEl, opts = {}) {
 	    // ------------------------------------------------------------------
     // Master volume
     // ------------------------------------------------------------------
-    bindMasterVolume($('#prMasterVol'));
+    bindMasterVolume($('#prMasterVol'), $('#prMasterVolumeValue'));
 	
     $('#prBackBtn')?.addEventListener('click', () => {
         stop();

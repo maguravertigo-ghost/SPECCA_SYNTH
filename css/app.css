@@ -1158,3 +1158,25 @@ input, textarea, [contenteditable="true"], .log-box { user-select: text; }
 .track-generator .arr-dialog-body p { margin: 0; }
 .track-generator details .arr-field { margin: 8px 0; }
 .track-generator-error { color: #ffa6aa; }
+
+/* Quick controls */
+.project-tempo { position: relative; }
+.quick-tempo-panel {
+    position: absolute; z-index: 510; top: calc(100% + 6px); right: 0; width: 208px;
+    display: grid; gap: 12px; padding: 12px; background: var(--panel-2);
+    border: 1px solid var(--border-hl); border-radius: var(--radius); box-shadow: 0 8px 24px #0008;
+}
+.quick-tempo-panel input[type="number"] { width: 76px; }
+.quick-tempo-panel input[type="range"] { width: 100%; }
+#prMasterVol { width: 96px; padding: 0; border: 0; background: transparent; cursor: pointer; }
+#prMasterVolumeValue { min-width: 4ch; font: 11px var(--mono); text-align: right; }
+.arr-colors { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 3px; }
+.arr-color { width: min(100%, 22px); aspect-ratio: 1; height: auto; padding: 0; }
+.font-library-actions, .font-library-row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.font-library-row { padding: 4px 0; }
+.font-library-row span { flex: 1; overflow-wrap: anywhere; min-width: 120px; }
+#savedFontList { max-height: 28vh; overflow-y: auto; }
+#soundFontChoice { max-height: calc(100dvh - 24px); overflow: auto; }
+.mixer-with-pan .mixer-pan { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; color: var(--text-mut); }
+.mixer-pan input { flex: 1; }
+.mixer-pan output { min-width: 3ch; }

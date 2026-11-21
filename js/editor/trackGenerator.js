@@ -1,5 +1,5 @@
 import { Sequence } from './sequence.js';
-import { TONICS, DRUM_GROOVES, generatePatternNotes, phraseNotes, scaleTone, voiceChord } from './noteGenerator.js';
+import { TONICS, DRUM_GROOVES, MUSIC_PRESETS, presetBassNotes, generatePatternNotes, phraseNotes, scaleTone, voiceChord } from './noteGenerator.js';
 
 export const TRACK_STYLES = {
     pop: { title: 'Pop', bpm: 110, groove: 'straight', kit: [0, 0, 33, 0], rhythm: [0, 3, 6, 8, 12] },
@@ -9,6 +9,7 @@ export const TRACK_STYLES = {
         modes: ['mixolydian', 'dorian'], phrases: [[0, 6, 3, 0], [0, 3, 6, 4], [3, 0, 6, 0]] },
     medieval: { title: 'Medieval', bpm: 88, groove: 'half-time', kit: [74, 46, 42, 0], rhythm: [0, 4, 6, 10, 12],
         modes: ['mixolydian', 'dorian'], phrases: [[0, 3, 6, 0], [0, 6, 4, 0], [0, 1, 6, 0]] },
+    ...MUSIC_PRESETS,
 };
 const PALETTES = { piano: [0, 48, 32, 0], electric: [4, 27, 33, 0], synth: [81, 89, 38, 0] };
 const MOODS = {
@@ -110,6 +111,7 @@ function partNotes({ preset, groove, tonic, mode, motif, random, degree, chord, 
         const key = scaleTone(tonic, mode, degree + offset);
         return key + 12 * Math.round((43 - key) / 12);
     };
+    if (role === 'bass' && preset.bass && !resolve) return presetBassNotes({ tonic, mode, degree, ticks, rhythm: preset.bass });
     if (role === 'bass') return resolve ? [pulse(low(0), 0, 15, 94)] : [pulse(low(0), 0, 7, 98),
         pulse(low(full ? 4 : 0), 8, full ? 12 : 15, 88), ...(full ? [pulse(low(0), 13, 16, 83)] : [])];
     if (motif.drumHits?.length && !resolve) {

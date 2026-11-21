@@ -10,7 +10,7 @@
 <body>
 
 <header class="menubar">
-    <div class="menubar-logo"><span class="material-icon" aria-hidden="true">piano</span> <span>SPESSA</span><small class="app-version">v1.8.0</small></div>
+    <div class="menubar-logo"><span class="material-icon" aria-hidden="true">piano</span> <span>SPESSA</span><small class="app-version">v1.9.0</small></div>
     <nav class="menubar-menus">
         <div class="menu" data-menu="file">
             <button class="menu-btn" type="button">File</button>
@@ -60,7 +60,12 @@
     </nav>
     <div class="menubar-right">
         <div class="project-tempo" title="Project tempo at the start of the arrangement">
-            <span id="projectBpmLabel">BPM</span><output id="projectBpm" aria-labelledby="projectBpmLabel">120</output>
+            <button type="button" id="projectTempoToggle" class="btn" aria-expanded="false" aria-controls="quickTempoPanel" title="Quick tempo settings"><span id="projectBpmLabel">BPM</span> <output id="projectBpm" aria-labelledby="projectBpmLabel">120</output> <span aria-hidden="true">▾</span></button>
+            <form id="quickTempoPanel" class="quick-tempo-panel" hidden>
+                <label class="arr-field"><span>Tempo (BPM)</span><input id="quickTempoBpm" type="number" min="20" max="400" step="0.01" required></label>
+                <input id="quickTempoRange" type="range" min="40" max="240" step="1" aria-label="Tempo slider">
+                <button class="btn btn-primary" type="submit">Apply tempo</button>
+            </form>
         </div>
         <label class="sample-rate">
             <span>SR</span>
@@ -73,7 +78,7 @@
         </label>
         <meter class="audio-meter" min="0" max="1" value="0" aria-label="Audio output level" title="Audio output level"></meter>
         <button id="audioUnlock" class="btn audio-enable" type="button">Enable audio</button>
-        <button class="btn audio-enable" data-local-soundfont type="button" title="Choose a SoundFont from your device instead of downloading it">SoundFont…</button>
+        <button class="btn audio-enable" data-local-soundfont type="button" title="Choose or switch SoundFont">SoundFont…</button>
         <progress data-font-progress class="font-progress" aria-label="SoundFont download progress" hidden></progress>
         <span id="audioState" class="audio-state" role="status">Audio off · press Play</span>
         <span id="status" class="app-status"></span>
@@ -139,7 +144,7 @@
                 <div class="player-empty">
                     <div class="player-empty-icon material-icon" aria-hidden="true">music_note</div>
                     <p id="ptTrackName">No track selected</p>
-                    <button class="btn" data-local-soundfont type="button" title="Choose a SoundFont from your device instead of downloading it">SoundFont…</button>
+                    <button class="btn" data-local-soundfont type="button" title="Choose or switch SoundFont">SoundFont…</button>
                     <progress data-font-progress class="font-progress" aria-label="SoundFont download progress" hidden></progress>
                     <p id="ptAudioState" class="audio-state" role="status">Audio off · press Play</p>
                     <p id="ptStatus" class="muted" aria-live="polite">Choose a track to preview. If voices are missing, try Compatible.</p>
@@ -149,13 +154,16 @@
     </div>
 </div>
 
-<dialog id="soundFontChoice" class="arr-dialog-box" aria-labelledby="soundFontChoiceTitle">
+<dialog id="soundFontChoice" class="arr-dialog-box app-dialog" aria-labelledby="soundFontChoiceTitle">
     <h2 id="soundFontChoiceTitle" class="arr-dialog-title">Choose a SoundFont</h2>
     <div class="arr-dialog-body">
         <p>Use the included soundfont.sf2 (~31 MiB) or select an SF2/SF3 file from your device. Local files are not uploaded.</p>
-        <button id="chooseBundledFont" class="btn btn-primary" type="button">Load from this site</button>
+        <div class="font-library-actions"><button id="chooseBundledFont" class="btn btn-primary" type="button">Load from this site</button>
+        <button id="saveBundledFont" class="btn" type="button">Download to disk and use</button></div>
         <label class="arr-field"><span>Local file</span><input id="startupSoundFont" type="file" accept=".sf2,.sf3"></label>
-        <button id="chooseStartupFont" class="btn" type="button" disabled>Use local file</button>
+        <div class="font-library-actions"><button id="chooseStartupFont" class="btn" type="button" disabled>Use and remember copy</button>
+        <button id="chooseFontHandle" class="btn" type="button" hidden>Link a file on disk…</button></div>
+        <strong>Remembered SoundFonts</strong><div id="savedFontList"></div><p id="fontLibraryStatus" role="status"></p>
     </div>
     <form method="dialog" class="arr-dialog-footer"><button class="btn" value="later">Edit without sound</button></form>
 </dialog>

@@ -70,6 +70,7 @@ const grooves = {
     euclidean: ['Euclidean', [euclideanPulses(16, 5)], [4, 12], euclideanPulses(16, 7)],
     dnb: ['Drum & Bass', [[0, 7, 10], [0, 3, 10, 14]], [4, 12], [0, 2, 3, 6, 8, 9, 10, 14, 15], { ghosts: [5, 11], open: [6, 14] }],
     techno: ['Techno', [[0, 4, 8, 12]], [4, 12], [0, 2, 4, 6, 8, 10, 12, 14, 15], { open: offbeats, snareKey: 39 }],
+    trance: ['Trance', [[0, 4, 8, 12]], [4, 12], [0, 2, 4, 6, 8, 10, 12, 14, 15], { open: offbeats, percussion: [[51, [0, 4, 8, 12]]] }],
     house: ['House', [[0, 4, 8, 12]], [4, 12], [2, 4, 6, 8, 10, 12, 14], { open: offbeats, percussion: [[54, [0, 4, 8, 12]]] }],
     rnb: ['R&B / Neo-soul', [[0, 6, 10, 15], [0, 3, 9, 14]], [4, 12], [0, 2, 5, 7, 8, 10, 13, 15], { ghosts: [3, 11], soft: true, snareKey: 37 }],
     hiphop: ['Hip-hop / Boom bap', [[0, 7, 8, 11], [0, 3, 8, 10]], [4, 12], eighths, { ghosts: [15] }],
@@ -125,9 +126,38 @@ function buildDrums({ style, section, random, lengthTicks, ticksPerBar, steps, s
     }
 }
 
+// Shared genre templates: rhythm, bass rhythm and GM instruments for full tracks.
+export const MUSIC_PRESETS = {
+    techno: { title: 'Techno', bpm: 132, groove: 'techno', kit: [81, 89, 38, 0], rhythm: [0, 3, 6, 8, 11, 14], bass: [0, 2, 4, 6, 8, 10, 12, 14] },
+    trance: { title: 'Trance', bpm: 138, groove: 'trance', kit: [81, 90, 39, 0], rhythm: [0, 2, 4, 7, 8, 10, 12, 14], bass: [2, 6, 10, 14] },
+    house: { title: 'House', bpm: 124, groove: 'house', kit: [4, 0, 38, 0], rhythm: [0, 3, 6, 10, 14], bass: [0, 3, 8, 11, 14] },
+    dnb: { title: 'Drum & Bass', bpm: 174, groove: 'dnb', kit: [81, 95, 39, 0], rhythm: [0, 3, 6, 9, 12, 15], bass: [0, 3, 7, 10, 14] },
+    hiphop: { title: 'Hip-hop / Boom bap', bpm: 90, groove: 'hiphop', kit: [11, 4, 32, 0], rhythm: [0, 4, 7, 10, 13], bass: [0, 6, 8, 13] },
+    rnb: { title: 'R&B / Neo-soul', bpm: 82, groove: 'rnb', kit: [4, 27, 33, 0], rhythm: [0, 3, 7, 10, 13, 15], bass: [0, 5, 9, 14] },
+    trap: { title: 'Trap', bpm: 146, groove: 'trap', kit: [10, 94, 38, 0], rhythm: [0, 6, 8, 11, 14], bass: [0, 3, 8, 14] },
+    rock: { title: 'Rock', bpm: 124, groove: 'rock', kit: [29, 27, 34, 0], rhythm: [0, 4, 6, 8, 12, 14], bass: [0, 2, 4, 6, 8, 10, 12, 14] },
+    funk: { title: 'Funk', bpm: 109, groove: 'funk', kit: [17, 28, 36, 0], rhythm: [0, 3, 6, 8, 11, 14], bass: [0, 3, 6, 8, 11, 15] },
+    reggae: { title: 'Reggae', bpm: 80, groove: 'reggae', kit: [16, 27, 33, 0], rhythm: [0, 2, 6, 10, 14], bass: [0, 6, 9, 12] },
+    latin: { title: 'Latin', bpm: 108, groove: 'latin', kit: [56, 24, 32, 0], rhythm: [0, 3, 6, 8, 10, 14], bass: [0, 6, 10, 14] },
+    disco: { title: 'Disco', bpm: 118, groove: 'disco', kit: [62, 48, 36, 0], rhythm: [0, 2, 6, 8, 10, 14], bass: [0, 2, 4, 6, 8, 10, 12, 14] },
+    jazz: { title: 'Jazz', bpm: 120, groove: 'jazz', kit: [66, 0, 32, 0], rhythm: [0, 4, 7, 8, 12, 15], bass: [0, 4, 8, 12] },
+    metal: { title: 'Metal', bpm: 152, groove: 'metal', kit: [30, 29, 34, 0], rhythm: [0, 2, 4, 8, 9, 12, 14], bass: [0, 2, 4, 6, 8, 10, 12, 14] },
+};
+
+export function presetBassNotes({ tonic, mode, degree, ticks, rhythm }) {
+    return rhythm.flatMap((position, i) => {
+        const tick = Math.round(ticks * position / 16);
+        const end = Math.round(ticks * (rhythm[i + 1] ?? 16) / 16);
+        if (end <= tick) return [];
+        const note = scaleTone(tonic, mode, degree + (i % 4 === 3 ? 4 : 0));
+        const key = note - 12 * Math.round((note - 43) / 12);
+        return [{ key, tick, dur: Math.max(1, Math.round((end - tick) * .72)), vel: i % 2 ? 83 : 99 }];
+    });
+}
+
 // Returns ordinary, editable MIDI notes. No network, synth or DOM dependencies.
 export function generatePatternNotes({ lengthTicks, ticksPerBar, stepsPerBar = 16, tonic = 0, mode = 'major',
-    style = 'chords', section = 'main', isDrum = false, random = Math.random } = {}) {
+    style = 'chords', section = 'main', preset = '', isDrum = false, random = Math.random } = {}) {
     if (!Number.isSafeInteger(lengthTicks) || lengthTicks < 1 || !Number.isSafeInteger(ticksPerBar) || ticksPerBar < 1) return [];
     const steps = Math.max(1, Math.round(stepsPerBar));
     const step = Math.max(1, Math.round(ticksPerBar / steps));
@@ -145,7 +175,8 @@ export function generatePatternNotes({ lengthTicks, ticksPerBar, stepsPerBar = 1
         buildDrums({ style, section, random, lengthTicks, ticksPerBar, steps, step, add });
     } else {
         const { progressions } = mode === 'minor' ? HARMONY.minor : HARMONY.major;
-        const progression = choose(progressions);
+        const genre = Object.hasOwn(MUSIC_PRESETS, preset) ? MUSIC_PRESETS[preset] : null;
+        const progression = genre ? progressions[0] : choose(progressions);
         // One-bar loops still get a change of harmony; longer patterns get one chord per bar.
         const span = lengthTicks <= ticksPerBar ? Math.max(1, Math.min(ticksPerBar, Math.round(steps / 2) * step)) : ticksPerBar;
         const variant = choose([[0, 1, 2, 1], [0, 2, 1, 2], [0, 1, 2, 0]]);
@@ -155,16 +186,21 @@ export function generatePatternNotes({ lengthTicks, ticksPerBar, stepsPerBar = 1
             // Keep a compact register over middle C while retaining the chord's three pitch classes.
             const voicing = chord.map(key => key > 78 ? key - 12 : key).sort((a, b) => a - b);
             const available = Math.min(span, lengthTicks - start);
-            if (style === 'melody') {
-                for (const note of phraseNotes({ tonic, mode, degree, ticks: available, contour: variant, answer: i % 4 === 2 })) {
+            if (style === 'bass') {
+                for (const note of presetBassNotes({ tonic, mode, degree, ticks: available, rhythm: genre?.bass ?? [0, 6, 8, 12] })) {
+                    add(note.key, start + note.tick, note.dur, note.vel);
+                }
+            } else if (style === 'melody') {
+                for (const note of phraseNotes({ tonic, mode, degree, ticks: available, rhythm: genre?.rhythm, contour: variant, answer: i % 4 === 2 })) {
                     add(note.key, start + note.tick, note.dur, note.vel);
                 }
             } else if (style === 'arpeggio') {
-                const pulse = Math.max(1, step * 2);
+                const pulse = Math.max(1, step * (genre && ['trance', 'techno', 'dnb'].includes(preset) ? 1 : 2));
                 for (let j = 0; j * pulse < available; j++) add(voicing[variant[j % variant.length]], start + j * pulse, Math.min(pulse * .82, available - j * pulse), j ? 84 : 100);
             } else {
                 const offbeat = Math.min(available - 1, Math.round(span * .625 / step) * step);
-                const pulses = style === 'syncopated' && offbeat > 0 ? [0, offbeat] : [0];
+                const accents = genre ? genre.rhythm.filter((_, i) => i % 2 === 0).map(p => Math.round(available * p / 16)).filter(p => p < available) : [];
+                const pulses = accents.length ? [...new Set(accents)] : style === 'syncopated' && offbeat > 0 ? [0, offbeat] : [0];
                 pulses.forEach((offset, j) => {
                     const dur = ((pulses[j + 1] ?? available) - offset) * (style === 'syncopated' ? .7 : .92);
                     for (const key of voicing) add(key, start + offset, dur, j ? 80 : 96);

@@ -41,3 +41,17 @@ function ask({ title, message, label, value = '', action }) {
 
 export const confirmAction = (title, message, action = 'Delete') => ask({ title, message, action });
 export const askName = (title, label, value) => ask({ title, label, value, action: 'Save' });
+
+export function askUnsavedChanges() {
+    return new Promise(resolve => {
+        const dialog = document.createElement('dialog');
+        dialog.className = 'arr-dialog-box app-dialog';
+        dialog.setAttribute('aria-label', 'Unsaved changes');
+        dialog.innerHTML = `<form method="dialog"><h2 class="arr-dialog-title">Unsaved changes</h2>
+            <div class="arr-dialog-body">Save changes to the current project before creating a new one?</div>
+            <div class="arr-dialog-footer"><button class="btn" value="cancel" autofocus>Cancel</button>
+            <button class="btn" value="discard">Discard</button><button class="btn btn-primary" value="save">Save</button></div></form>`;
+        dialog.addEventListener('close', () => { dialog.remove(); resolve(dialog.returnValue || 'cancel'); }, { once: true });
+        document.body.append(dialog); dialog.showModal();
+    });
+}

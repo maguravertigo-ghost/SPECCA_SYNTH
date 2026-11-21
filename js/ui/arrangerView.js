@@ -14,6 +14,8 @@ const MIN_BAR_W  = 80;
 const COLORS = [
     '#4ec9b0','#dcdcaa','#c586c0','#ce9178','#569cd6','#888888',
     '#e35b5b','#6bb0ff','#4ec9ff','#ffcc00','#ff6bcb','#6bffb2',
+    '#ff8c42','#f7a8b8','#9b7ede','#725fff','#4539ad','#2d8a85',
+    '#00b894','#83c94e','#bbc940','#dc9862','#b97052','#e1e7ee',
 ];
 
 const escapeHtml = (text) => String(text).replace(/[&<>"']/g, (ch) => ({
@@ -503,7 +505,7 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
                     <label class="arr-field">
                         <span>Color</span>
                         <div class="arr-colors" id="dlgColors">
-                            ${COLORS.map((c, idx) => `<span class="arr-color ${existing?.color === c ? 'active' : ''}" data-color="${c}" style="background:${c}"></span>`).join('')}
+                            ${COLORS.map((c, idx) => `<button type="button" aria-label="Color ${idx + 1}" title="${c}" class="arr-color ${existing?.color === c ? 'active' : ''}" data-color="${c}" style="background:${c}"></button>`).join('')}
                         </div>
                     </label>
                     <label class="arr-field" id="dlgVolField">

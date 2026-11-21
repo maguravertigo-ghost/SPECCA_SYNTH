@@ -81,3 +81,17 @@ test('genre grooves use distinct MIDI rhythms and every section stays within a p
         if (section === 'breakdown') assert.ok(!notes.some(n => n.key === 36));
     }
 });
+
+test('genre bass presets use different rhythmic shapes and complement in-key melodies', () => {
+    const args = { ...base, mode: 'minor', tonic: 0, style: 'bass' };
+    const techno = generatePatternNotes({ ...args, preset: 'techno' });
+    const trance = generatePatternNotes({ ...args, preset: 'trance' });
+    const melody = generatePatternNotes({ ...args, style: 'melody', preset: 'techno' });
+    assert.ok(techno.length > trance.length);
+    assert.equal(techno[0].tick, 0);
+    assert.ok(trance[0].tick > 0);
+    const scale = [0, 2, 3, 5, 7, 8, 10];
+    assert.ok([...techno, ...trance].every(n => n.key < 55 && scale.includes(n.key % 12)));
+    assert.ok(melody.every(n => n.key > 60 && scale.includes(n.key % 12)));
+    assert.ok(inRange([...techno, ...trance, ...melody], args.lengthTicks));
+});

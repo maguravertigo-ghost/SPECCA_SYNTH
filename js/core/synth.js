@@ -7,19 +7,23 @@ let masterGain = null;
 let volume = 1;
 let analyser = null;
 let sampleFrame = null;
-const volumeControls = new Set();
+const volumeControls = new Map();
 
 export function setMasterVolume(value) {
     if (!Number.isFinite(value)) return;
     volume = Math.max(0, Math.min(1, value));
     if (masterGain) masterGain.gain.value = volume;
-    for (const control of volumeControls) control.value = String(Math.round(volume * 100));
+    for (const [control, output] of volumeControls) {
+        control.value = String(Math.round(volume * 100));
+        if (output) output.value = `${control.value}%`;
+    }
 }
 
-export function bindMasterVolume(control) {
+export function bindMasterVolume(control, output = null) {
     if (!control) return;
-    volumeControls.add(control);
+    volumeControls.set(control, output);
     control.value = String(Math.round(volume * 100));
+    if (output) output.value = `${control.value}%`;
     control.addEventListener('input', () => setMasterVolume(Number(control.value) / 100));
 }
 
@@ -52,6 +56,7 @@ export function applyLiveMix(index, info) {
     mixedChannels.add(index);
     channel.setSystemParameter('gain', (info.volume ?? 100) / 100);
     channel.setSystemParameter('isMuted', !!info.muted);
+    if (Number.isInteger(info.pan)) channel.setSystemParameter('pan', Math.max(-1, Math.min(1, (info.pan - 64) / (info.pan > 64 ? 63 : 64))));
 }
 
 function resetLiveMix() {
@@ -59,6 +64,7 @@ function resetLiveMix() {
         const channel = synth?.midiChannels[index];
         channel?.setSystemParameter('gain', 1);
         channel?.setSystemParameter('isMuted', false);
+        channel?.setSystemParameter('pan', 0);
     }
     mixedChannels.clear();
 }
@@ -80,13 +86,17 @@ let previewSeq = null;
 let readyPromise = null;
 let audioStatus = { state: 'idle', message: 'Audio off · press Play' };
 const statusListeners = new Set();
-const soundFont = createSoundFontSource(new URL('../../soundfont.sf2', import.meta.url));
+export const bundledFontURL = new URL('../../soundfont.sf2', import.meta.url);
+const soundFont = createSoundFontSource(bundledFontURL);
+let onFontInstalled = null;
+let replacingFont = false;
 let installingFont = false;
 
-export function selectLocalSoundFont(file) {
+export function selectLocalSoundFont(file, onInstalled = null) {
     if (synth || installingFont) return false;
     soundFont.select(file);
-    if (!readyPromise) reportAudio('idle', `Local SoundFont selected · press Play (${file.name})`);
+    onFontInstalled = onInstalled;
+    if (!readyPromise) reportAudio('idle', file ? `SoundFont selected · ${file.name} · press Play` : 'Bundled SoundFont selected · press Play');
     return true;
 }
 
@@ -97,7 +107,7 @@ export function onAudioStatus(listener) {
 }
 
 function reportAudio(state, message, progress = false) {
-    audioStatus = { state, message, progress, canSelectFont: !synth && !installingFont };
+    audioStatus = { state, message, progress, canSelectFont: !installingFont && !replacingFont };
     for (const listener of statusListeners) listener(audioStatus);
 }
 
@@ -162,6 +172,7 @@ function ensureContext() {
 // Called directly from Play or Enable audio, before any asynchronous MIDI I/O.
 export async function initSynth() {
     if (synth) {
+        if (replacingFont) throw new Error('SoundFont is being switched.');
         await resumeAudio();
         return;
     }
@@ -210,6 +221,9 @@ export async function initSynth() {
                 soundFont.read({ signal: download.signal, onStatus: (label, progress) => reportAudio('loading', label, progress) }),
                 workletFailure,
             ]);
+            validateSoundFont(sfBuffer);
+            const remember = onFontInstalled;
+            const copy = remember ? new Blob([sfBuffer]) : null;
             installingFont = true;
             try {
                 await audioStep('Installing SoundFont', 20000, () => candidate.soundBankManager.addSoundBank(sfBuffer, 'main-sf2', 0), workletFailure);
@@ -221,6 +235,8 @@ export async function initSynth() {
             previewSeq = new Sequencer(candidate, { skipToFirstNoteOn: false });
             synth = candidate;
             reportAudio('ready', `Audio ready · ${context.sampleRate / 1000} kHz`);
+            onFontInstalled = null;
+            if (remember) await remember(copy);
         } catch (error) {
             try { candidate?.destroy(); } catch {}
             if (context && context.state !== 'closed') context.close().catch(() => {});
@@ -235,6 +251,37 @@ export async function initSynth() {
 
     readyPromise = init().finally(() => { readyPromise = null; });
     return readyPromise;
+}
+
+function validateSoundFont(bytes) {
+    const header = new TextDecoder().decode(bytes.slice(0, 12));
+    if (!header.startsWith('RIFF') || header.slice(8) !== 'sfbk') {
+        throw new Error('Choose a valid SF2 or SF3 SoundFont.');
+    }
+}
+
+export async function changeSoundFont(file, onInstalled = null) {
+    if (!synth) {
+        if (!selectLocalSoundFont(file, onInstalled)) throw new Error('Wait for the current SoundFont install.');
+        return initSynth();
+    }
+    if (replacingFont) throw new Error('Wait for the current SoundFont switch.');
+    replacingFont = true;
+    const source = createSoundFontSource(bundledFontURL);
+    source.select(file);
+    try {
+        reportAudio('loading', 'Switching SoundFont');
+        await lastLoad.catch(() => {});
+        const bytes = await source.read({ signal: new AbortController().signal, onStatus: (label, progress) => reportAudio('loading', label, progress) });
+        validateSoundFont(bytes);
+        const copy = onInstalled ? new Blob([bytes]) : null;
+        seq.pause(); previewSeq.pause(); synth.stopAll(true);
+        await audioStep('Installing SoundFont', 20000, () => synth.soundBankManager.addSoundBank(bytes, 'main-sf2', 0));
+        if (onInstalled) await onInstalled(copy);
+    } finally {
+        replacingFont = false;
+        reportAudio('ready', `Audio ready · ${ctx.sampleRate / 1000} kHz`);
+    }
 }
 
 let loadId = 0;

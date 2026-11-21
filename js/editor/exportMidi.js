@@ -62,7 +62,7 @@ function writeSequence(sequence, clips, { loop = null, respectMute = false, live
         emit(0, -2, [0xc0 | ch, (info.program ?? 0) & 0x7f], part);
         const volume = liveMix ? 100 : respectMute && info.muted ? 0 : (info.volume ?? 100);
         emit(0, -1, [0xb0 | ch, 7, Math.round(volume * 127 / 100)], part);
-        emit(0, -1, [0xb0 | ch, 10, (info.pan ?? 64) & 0x7f], part);
+        emit(0, -1, [0xb0 | ch, 10, liveMix ? 64 : (info.pan ?? 64) & 0x7f], part);
     }
     if (loop) {
         const loopEnd = loop.end ?? endTick;

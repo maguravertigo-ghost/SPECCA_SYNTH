@@ -1,6 +1,7 @@
+import { mountSoundFontLibrary } from './ui/soundFontLibrary.js';
 // js/main.js
 import { log, setStatus, wireGlobalErrorHandlers } from './core/log.js';
-import { initSynth, onAudioStatus, selectLocalSoundFont, applyChannelVolume, getAudioContext, getSequencer, getOutputLevel, getMasterVolume, getSynth } from './core/synth.js';
+import { initSynth, onAudioStatus, applyChannelVolume, getAudioContext, getSequencer, getPreviewSequencer, getOutputLevel, getMasterVolume, getSynth } from './core/synth.js';
 import { Playlist } from './playlist.js';
 import { mountMenubar } from './ui/menubar.js';
 import { mountPlayerOverlay } from './ui/playerOverlay.js';
@@ -10,7 +11,7 @@ import { adaptToSoundfont } from './editor/instruments.js';
 import { writeArrangementMIDI, writeChannelMIDIFiles } from './editor/exportMidi.js';
 import { appendMidiChannels } from './editor/appendMidiChannels.js';
 import { zipStoredFiles } from './core/zipStore.js';
-import { askName, confirmAction } from './ui/dialogs.js';
+import { askName, confirmAction, askUnsavedChanges } from './ui/dialogs.js';
 import { openTrackGenerator } from './ui/trackGeneratorDialog.js';
 import { openMixer } from './ui/mixer.js';
 import { createEditHistory } from './editor/history.js';
@@ -46,6 +47,7 @@ const playlist = new Playlist();
 // ---------------- Editor state ----------------
 let pianoRoll = null;
 let currentSequence = null;
+let savedSnapshot = null;
 const history = createEditHistory();
 let menubar;
 const syncHistory = () => {
@@ -64,7 +66,7 @@ function restoreEdit(action) {
     if (channel != null && !currentSequence.channels.some(c => c.channel === channel)) showArranger();
     refreshAll(); syncHistory();
 }
-const showProjectMixer = () => openMixer({ title: 'Project mixer',
+const showProjectMixer = () => openMixer({ title: 'Project mixer', showPan: true,
     channels: currentSequence.orderedChannels().filter(c => c.kind !== 'comment'),
     onChange: channel => {
         applyChannelVolume(channel);
@@ -90,13 +92,44 @@ function refreshProjectTempo() {
     output.value = Number.isFinite(tempo) ? String(Number(tempo.toFixed(2))) : '–';
 }
 
+function mountQuickTempo() {
+    const root = document.querySelector('.project-tempo');
+    const toggle = document.getElementById('projectTempoToggle');
+    const panel = document.getElementById('quickTempoPanel');
+    const field = document.getElementById('quickTempoBpm');
+    const range = document.getElementById('quickTempoRange');
+    const close = () => { toggle.setAttribute('aria-expanded', 'false'); panel.hidden = true; };
+    toggle.addEventListener('click', () => {
+        if (!panel.hidden) { close(); return; }
+        field.value = currentSequence?.tempo ?? 120; range.value = field.value;
+        panel.hidden = false; toggle.setAttribute('aria-expanded', 'true'); field.focus(); field.select();
+    });
+    field.addEventListener('input', () => { if (field.validity.valid) range.value = field.value; });
+    range.addEventListener('input', () => { field.value = range.value; });
+    panel.addEventListener('submit', event => {
+        event.preventDefault();
+        if (!currentSequence || !field.validity.valid) return;
+        const seq = currentSequence;
+        if (seq.tempo !== field.valueAsNumber) {
+            arrangerView?.stop(); pianoRoll?.stop();
+            seq.tempo = field.valueAsNumber;
+            refreshAll(); commitEdit();
+            setStatus(`Tempo: ${seq.tempo} BPM`);
+        }
+        close(); toggle.focus();
+    });
+    document.addEventListener('pointerdown', event => { if (!root.contains(event.target)) close(); });
+    root.addEventListener('keydown', event => { if (event.key === 'Escape' && !panel.hidden) { close(); toggle.focus(); } });
+}
+
 function useSequence(sequence, name = null, { keepHistory = false } = {}) {
     arrangerView?.stop();
     currentSequence = sequence;
     if (name) sequence.name = name;
     refreshProjectTempo();
-    if (keepHistory) history.commit(sequence.toJSON(0));
-    else history.reset(sequence.toJSON(0));
+    const snapshot = sequence.toJSON(0);
+    if (keepHistory) history.commit(snapshot);
+    else { history.reset(snapshot); savedSnapshot = snapshot; }
     syncHistory();
     selectedPatterns.clear();
     pianoRoll?.setChannel(null);
@@ -117,27 +150,8 @@ function openMidiBuffer(buffer, name) {
 function mountAudioStatus() {
     const button = document.getElementById('audioUnlock');
     const statuses = [document.getElementById('audioState'), document.getElementById('ptAudioState')];
-    const picker = document.getElementById('soundFontChoice');
-    const startupFont = document.getElementById('startupSoundFont');
-    const useLocal = document.getElementById('chooseStartupFont');
-    startupFont.addEventListener('change', () => { useLocal.disabled = !startupFont.files.length; });
-    const start = () => { picker.close(); initSynth().catch(() => {}); };
-    const useBundled = document.getElementById('chooseBundledFont');
-    if (location.hostname.endsWith('github.io')) useBundled.textContent = 'Load from GitHub Pages';
-    useBundled.addEventListener('click', start);
-    useLocal.addEventListener('click', () => {
-        const file = startupFont.files?.[0];
-        if (file && selectLocalSoundFont(file)) start();
-    });
-    picker.showModal();
-    const fontInput = document.getElementById('localSoundFont');
     const fontButtons = [...document.querySelectorAll('[data-local-soundfont]')];
-    for (const choose of fontButtons) choose.addEventListener('click', () => fontInput.click());
-    fontInput.addEventListener('change', () => {
-        const file = fontInput.files?.[0];
-        fontInput.value = '';
-        if (file) selectLocalSoundFont(file);
-    });
+    for (const choose of fontButtons) choose.addEventListener('click', () => fontLibrary.open());
     button.addEventListener('click', () => initSynth().catch(() => {}));
     onAudioStatus(({ state, message, progress, canSelectFont = true }) => {
         for (const status of statuses) {
@@ -147,7 +161,7 @@ function mountAudioStatus() {
         }
         for (const choose of fontButtons) {
             choose.disabled = !canSelectFont;
-            choose.hidden = state === 'ready';
+
         }
         for (const bar of document.querySelectorAll('[data-font-progress]')) {
             bar.hidden = progress?.loaded == null;
@@ -267,6 +281,7 @@ const saveProjectToLocal = async () => {
     try { writeProjects({ ...projects, [name]: entry }); }
     catch (error) { log(`Save failed: ${error}`, 'error'); setStatus('Could not save project'); return; }
     seq.name = name;
+    savedSnapshot = seq.toJSON(0);
     commitEdit();
     log(`main: project saved "${name}"`);
     setStatus(`Saved: ${name}`);
@@ -368,7 +383,13 @@ function exportChannelFiles() {
 
 // ---------------- Menubar ----------------
 menubar = mountMenubar({
-    new: () => {
+    new: async () => {
+        const previous = currentSequence;
+        if (previous && previous.toJSON(0) !== savedSnapshot) {
+            const action = await askUnsavedChanges();
+            if (action === 'cancel' || currentSequence !== previous) return;
+            if (action === 'save' && !await saveProjectToLocal()) return;
+        }
         openProjectSettings({
             title: 'New Project',
             initial: { name: 'Untitled', bpm: 120, bars: 4, steps: 16 },
@@ -422,14 +443,16 @@ menubar = mountMenubar({
         const seq = currentSequence;
         openProjectSettings({
             title: 'Project Settings',
+            onSoundFont: () => fontLibrary.open(),
             initial: {
                 name:  seq?.name  || 'Untitled',
-                bpm:   Math.round(seq?.tempo || 120),
+                bpm:   seq?.tempo || 120,
                 bars: Math.max(1, Math.round(seq.patternLengthTicks / seq.ticksPerBar)),
                 steps: seq.stepsPerBar,
             },
             onApply: ({ name, bpm, bars, steps }) => {
                 if (!seq) return;
+                if (seq.tempo !== bpm) { arrangerView?.stop(); pianoRoll?.stop(); }
                 seq.name  = name;
                 seq.tempo = bpm;
                 seq.stepsPerBar = steps;
@@ -506,7 +529,18 @@ const playerOverlay = mountPlayerOverlay({
 // ---------------- Init UI ----------------
 await playlist.load();
 
+const fontLibrary = mountSoundFontLibrary({
+    beforeSwitch: () => {
+        // An early local choice may be replacing a stalled bundled download.
+        if (!getSynth()) return;
+        getPreviewSequencer()?.pause();
+        arrangerView?.stop(); pianoRoll?.stop();
+    },
+    report: setStatus,
+});
 mountAudioStatus();
+mountQuickTempo();
+await fontLibrary.restore();
 logPanel?.classList.add('collapsed');
 
 log('main: shell ready');

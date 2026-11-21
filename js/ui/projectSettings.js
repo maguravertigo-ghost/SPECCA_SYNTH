@@ -1,7 +1,7 @@
 // js/ui/projectSettings.js
 import { log } from '../core/log.js';
 
-export function openProjectSettings({ initial = {}, title = 'Project Settings', onApply } = {}) {
+export function openProjectSettings({ initial = {}, title = 'Project Settings', onApply, onSoundFont } = {}) {
     const overlay = document.createElement('div');
     overlay.className = 'pr-picker-overlay';
     overlay.innerHTML = `
@@ -14,7 +14,7 @@ export function openProjectSettings({ initial = {}, title = 'Project Settings', 
                 </label>
                 <label class="pr-num" style="justify-content:space-between">
                     <span>BPM</span>
-                    <input id="psBpm" type="number" min="40" max="200" value="${initial.bpm ?? 120}">
+                    <input id="psBpm" type="number" min="20" max="400" step="0.01" value="${initial.bpm ?? 120}">
                 </label>
                 <label class="pr-num" style="justify-content:space-between">
                     <span>Bars per new pattern</span>
@@ -24,6 +24,7 @@ export function openProjectSettings({ initial = {}, title = 'Project Settings', 
                     <span>Steps / bar</span>
                     <input id="psSteps" type="number" min="1" max="16" value="${initial.steps ?? 4}">
                 </label>
+                ${onSoundFont ? '<div class="pr-num" style="justify-content:space-between"><span>Playback SoundFont</span><button type="button" class="btn" id="psSoundFont">Choose / change…</button></div>' : ''}
             </div>
             <div style="display:flex;gap:8px;padding:0 16px 14px;justify-content:flex-end">
                 <button class="btn" id="psCancel" type="button">Cancel</button>
@@ -36,11 +37,12 @@ export function openProjectSettings({ initial = {}, title = 'Project Settings', 
 
     const close = () => overlay.remove();
     overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+    overlay.querySelector('#psSoundFont')?.addEventListener('click', onSoundFont);
     overlay.querySelector('#psCancel').addEventListener('click', close);
     overlay.querySelector('#psOk').addEventListener('click', () => {
         const data = {
             name:  overlay.querySelector('#psName').value.trim()  || 'Untitled',
-            bpm:   Math.max(40, Math.min(200, Number(overlay.querySelector('#psBpm').value)  || 120)),
+            bpm:   Math.max(20, Math.min(400, Number(overlay.querySelector('#psBpm').value)  || 120)),
             bars:  Math.max(1,  Math.min(32,  Number(overlay.querySelector('#psBars').value) || 4)),
             steps: Math.max(1,  Math.min(16,  Number(overlay.querySelector('#psSteps').value)|| 4)),
         };
