@@ -1,3 +1,4 @@
+import { automationEvents } from './automation.js';
 // One MIDI writer for the pattern preview and the complete arrangement.
 function writeVarLen(value) {
     const bytes = [value & 0x7f];
@@ -33,6 +34,14 @@ function writeSequence(sequence, clips, { loop = null, respectMute = false, live
     for (const { pattern, startTick, trim } of clips) {
         if (visual.has(pattern.channel)) continue;
         endTick = Math.max(endTick, startTick + pattern.lengthTicks);
+        const lane = pattern.channel;
+        for (const event of pattern.automationEvents ?? automationEvents(pattern, sequence.timeDivision)) {
+            if (!Number.isInteger(lane) || lane < 0) continue;
+            active.add(lane);
+            const channelPan = sequence.channels.find(c => c.channel === lane)?.pan ?? 64;
+            const value = event.cc === 10 && !liveMix ? Math.max(0, Math.min(127, channelPan + event.value - 64)) : event.value;
+            emit(startTick + event.tick, event.reset ? -0.5 : .5, [0xb0 | lane % 16, event.cc, value], trackKey(lane));
+        }
         for (const note of pattern.notes) {
             const lane = note.track;
             if (!Number.isInteger(lane) || lane < 0 || lane >= 128 * 16) throw new Error(`Invalid MIDI lane: ${lane}`);
@@ -62,6 +71,7 @@ function writeSequence(sequence, clips, { loop = null, respectMute = false, live
         emit(0, -2, [0xc0 | ch, (info.program ?? 0) & 0x7f], part);
         const volume = liveMix ? 100 : respectMute && info.muted ? 0 : (info.volume ?? 100);
         emit(0, -1, [0xb0 | ch, 7, Math.round(volume * 127 / 100)], part);
+        emit(0, -1, [0xb0 | ch, 11, 127], part);
         emit(0, -1, [0xb0 | ch, 10, liveMix ? 64 : (info.pan ?? 64) & 0x7f], part);
     }
     if (loop) {
@@ -149,7 +159,16 @@ export function writePatternMixMIDI(sequence, patternId, { placementId, anchorTi
             const first = Math.max(startTick, onset), last = Math.min(endTick, release);
             if (last > first) notes.push({ ...n, tick: first - startTick, dur: last - first });
         }
-        if (notes.length) clips.push({ startTick: 0, trim: true, pattern: { channel: p.channel, lengthTicks: pattern.lengthTicks, notes } });
+        const offset = startTick - start;
+        const source = automationEvents(p, sequence.timeDivision);
+        const automation = [];
+        for (const cc of [10, 11]) {
+            const events = source.filter(e => e.cc === cc);
+            const previous = events.filter(e => e.tick <= offset).at(-1);
+            if (previous) automation.push({ ...previous, tick: 0, reset: false });
+            automation.push(...events.filter(e => e.tick > offset && e.tick <= offset + pattern.lengthTicks).map(e => ({ ...e, tick: e.tick-offset })));
+        }
+        if (notes.length || automation.length) clips.push({ startTick: 0, trim: true, pattern: { channel: p.channel, lengthTicks: pattern.lengthTicks, notes, automationEvents: automation } });
     };
     for (const clip of sequence.arrangement) add(patterns.get(clip.patternId), clip.startTick);
     if (!placement) add(pattern, startTick);

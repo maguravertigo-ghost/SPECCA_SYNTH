@@ -1,3 +1,4 @@
+import { mountAutomationEditor } from '../ui/automationEditor.js';
 import { choosePitchFix } from '../ui/fixNotesDialog.js';
 // js/editor/pianoRoll.js
 import { getInstrumentLabel, mountInstrumentFields } from '../ui/instrumentFields.js';
@@ -61,6 +62,7 @@ export function mountPianoRoll(rootEl, opts = {}) {
                     <input id="prPatternBars" type="number" min="1" max="1024" step="1" aria-label="Pattern length in bars">
                 </label>
                 <button id="prDeletePattern" class="pr-t-btn" type="button" title="Delete pattern and all its clips">Delete pattern</button>
+                <button id="prEffects" class="pr-t-btn" type="button" aria-pressed="false">Effects</button>
                 <button id="prGenerate" class="pr-t-btn" type="button" title="Generate notes for this pattern"><span class="material-icon" aria-hidden="true">auto_awesome</span> Generate</button>
                 <button id="prFixNotes" class="pr-t-btn" type="button" title="Correct out-of-scale pitches">FIX</button>
             </div>
@@ -940,7 +942,11 @@ export function mountPianoRoll(rootEl, opts = {}) {
         indicator.dataset.state = channel?.muted ? 'muted' : 'on';
         if (indicator.textContent !== status) indicator.textContent = status;
     };
+    const automationEditor = mountAutomationEditor({ host: wrap, button: $('#prEffects'), getPattern,
+        onCommit: () => { dirty = true; scheduleHotReload(); onEdit?.(); },
+    });
     const refreshHeader = () => {
+        automationEditor.refresh();
         const channel = getChannelInfo();
         const pattern = getPattern();
         $('#prChannelName').textContent = channel ? channel.name || `Ch ${channel.channel + 1}` : 'Piano Roll';
@@ -962,6 +968,7 @@ export function mountPianoRoll(rootEl, opts = {}) {
         $('#prPatternField').hidden = !patterns.length;
         $('#prNewPattern').disabled = !channel;
         $('#prDeletePattern').disabled = !pattern;
+        $('#prEffects').hidden = comment;
         $('#prGenerate').hidden = comment;
         $('#prGenerate').disabled = !pattern;
         $('#prFixNotes').hidden = comment || !!channel?.isDrum;
