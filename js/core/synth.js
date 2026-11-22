@@ -326,7 +326,10 @@ export async function loadSong(buffer, name = '', target = seq, isCurrent = () =
     return operation;
 }
 
+const beforeSongLoad = new Set();
+export function onBeforeSongLoad(listener) { beforeSongLoad.add(listener); return () => beforeSongLoad.delete(listener); }
 async function loadSongInternal(seq, buffer, name) {
+    for (const listener of beforeSongLoad) listener();
     resetLiveMix();
     if (seq === previewSeq && synth.soundBankManager.soundBankList.some(b => b.id === 'spessa-chip')) {
         await synth.soundBankManager.deleteSoundBank('spessa-chip');

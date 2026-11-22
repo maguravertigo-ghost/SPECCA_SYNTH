@@ -1,5 +1,5 @@
 import { mountManualKeyboard } from '../ui/manualKeyboard.js';
-import { startManualVoice, silenceManualVoices } from '../core/manualVoice.js';
+import { startManualVoice, silenceManualVoices, prepareManualVoice } from '../core/manualVoice.js';
 import { recordedSegments } from './liveRecording.js';
 import { prepareChipBank } from '../core/synth.js';
 import { mountAutomationEditor } from '../ui/automationEditor.js';
@@ -602,6 +602,8 @@ export function mountPianoRoll(rootEl, opts = {}) {
             const sequencer = getSequencer();
             if (!await loadSong(midi, pattern.name, sequencer, () => request === playbackRequest && state.visible && !rootEl.inert)) return;
             applyChannelMix(seq);
+            if (manualKeyboard?.visible) await prepareManualVoice(seq, getChannelInfo());
+            if (request !== playbackRequest) return;
             sequencer.loopCount = state.loopEnabled ? Infinity : 0;
             const secondsPerTick = 60 / (seq.tempoAt(startTick) * seq.timeDivision);
             const origin = seq.ticksToSeconds(startTick);
@@ -1025,6 +1027,7 @@ export function mountPianoRoll(rootEl, opts = {}) {
             recordLastLocal = null;
             $('#prEditStatus').textContent = armed ? 'REC armed · Start playback, then play the keyboard. Existing notes are kept.' : 'REC off · Keyboard is for audition only.';
         },
+        onWarm: () => prepareManualVoice(getSeq(), getChannelInfo()),
         onError: error => { $('#prEditStatus').textContent = error.message; },
     });
     const refreshHeader = () => {

@@ -1,7 +1,7 @@
 const names=['C','C♯','D','D♯','E','F','F♯','G','G♯','A','A♯','B'];
 const codes=['KeyZ','KeyS','KeyX','KeyD','KeyC','KeyV','KeyG','KeyB','KeyH','KeyN','KeyJ','KeyM','KeyQ','Digit2','KeyW','Digit3','KeyE','KeyR','Digit5','KeyT','Digit6','KeyY','Digit7','KeyU','KeyI'];
 const hints=['Z','S','X','D','C','V','G','B','H','N','J','M','Q','2','W','3','E','R','5','T','6','Y','7','U','I'];
-export function mountManualKeyboard({host,button,getContext,startVoice,onStart,onEnd,onFlush,onRecordChange,onError}) {
+export function mountManualKeyboard({host,button,getContext,startVoice,onStart,onEnd,onFlush,onRecordChange,onWarm,onError}) {
     const panel=document.createElement('section');panel.className='manual-keyboard';panel.hidden=true;
     panel.innerHTML=`<div class="manual-tools"><strong>Live keyboard</strong><button type="button" data-octave="-1" aria-label="Octave down">− Oct</button><output data-octave-label></output><button type="button" data-octave="1" aria-label="Octave up">+ Oct</button><label>Velocity <input type="range" min="1" max="127" value="100" aria-label="Keyboard velocity"></label><button type="button" data-rec aria-pressed="false">● REC</button><button type="button" data-panic>All notes off</button></div><div class="manual-keys" role="group" aria-label="Playable piano keyboard"></div><small>Lower octave: Z S X D C V G B H N J M · upper: Q 2 W 3 E R 5 T 6 Y 7 U I · octave: −/+ buttons · click/touch keys to play · REC records only during playback. Physical key positions work with Russian layout too.</small>`;
     host.append(panel);
@@ -43,7 +43,7 @@ export function mountManualKeyboard({host,button,getContext,startVoice,onStart,o
     }
     function release(id){const voice=held.get(id);if(!voice)return;held.delete(id);voice.ended=true;voice.release?.();if(voice.record)onEnd?.(voice.key,voice.record);highlight();}
     function flush(){for(const id of [...held.keys()]){held.get(id)?.release?.panic?.();release(id);}onFlush?.();}
-    button.addEventListener('click',()=>{flush();visible=!visible;panel.hidden=!visible;button.classList.toggle('active',visible);button.setAttribute('aria-pressed',String(visible));if(!visible)setArmed(false);});
+    button.addEventListener('click',()=>{flush();visible=!visible;panel.hidden=!visible;button.classList.toggle('active',visible);button.setAttribute('aria-pressed',String(visible));if(!visible)setArmed(false);else onWarm?.()?.catch(onError);});
     function setArmed(value){if(armed===value)return;flush();armed=value;rec.classList.toggle('recording',armed);rec.setAttribute('aria-pressed',String(armed));onRecordChange?.(armed);}
     rec.addEventListener('click',()=>setArmed(!armed));
     panel.querySelector('[data-panic]').addEventListener('click',flush);
@@ -60,5 +60,5 @@ export function mountManualKeyboard({host,button,getContext,startVoice,onStart,o
     // A modal can open without moving focus immediately; release voices in that case too.
     const observer=new MutationObserver(()=>{if(held.size&&!allowed())flush();});observer.observe(document.body,{subtree:true,childList:true,attributes:true,attributeFilter:['open']});
     draw();
-    return {flush, get armed(){return armed;}, refresh(){const context=getContext();if(context?.identity!==identity||!context?.enabled){flush();identity=context?.identity;setArmed(false);}button.hidden=!context?.enabled;if(!context?.enabled){visible=false;panel.hidden=true;button.setAttribute('aria-pressed','false');button.classList.remove('active');}},destroy(){flush();observer.disconnect();document.removeEventListener('keydown',down,true);document.removeEventListener('keyup',up,true);window.removeEventListener('blur',blur);document.removeEventListener('visibilitychange',blur);document.removeEventListener('focusin',focus);panel.remove();}};
+    return {flush, get visible(){return visible;}, get armed(){return armed;}, refresh(){const context=getContext();if(context?.identity!==identity||!context?.enabled){flush();identity=context?.identity;setArmed(false);}button.hidden=!context?.enabled;if(!context?.enabled){visible=false;panel.hidden=true;button.setAttribute('aria-pressed','false');button.classList.remove('active');}},destroy(){flush();observer.disconnect();document.removeEventListener('keydown',down,true);document.removeEventListener('keyup',up,true);window.removeEventListener('blur',blur);document.removeEventListener('visibilitychange',blur);document.removeEventListener('focusin',focus);panel.remove();}};
 }

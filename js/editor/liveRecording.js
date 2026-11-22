@@ -8,8 +8,11 @@ export function recordedSegments(start,end,length,quantum=1) {
         const local=((cursor%length)+length)%length;
         const available=length-local;
         const span=Math.min(available,Math.max(1,end-cursor));
-        const tick=Math.max(0,Math.min(length-1,Math.round(Math.round(local/q)*q)));
-        const release=Math.min(length,Math.max(tick+1,Math.round(Math.round((local+span)/q)*q)));
+        // A short tap must not collapse to a 1-tick, effectively inaudible note.
+        // Keep the onset on the last valid grid line, including at the loop edge.
+        const lastGrid=Math.min(length-1,Math.round(Math.floor((length-1)/q)*q));
+        const tick=Math.max(0,Math.min(lastGrid,Math.round(Math.round(local/q)*q)));
+        const release=Math.min(length,Math.max(tick+Math.max(1,Math.round(q)),Math.round(Math.round((local+span)/q)*q)));
         result.push({tick,dur:release-tick});
         cursor+=span;
     }
