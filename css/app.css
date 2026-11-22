@@ -1211,3 +1211,19 @@ input, textarea, [contenteditable="true"], .log-box { user-select: text; }
 .chip-value-controls { display:flex; align-items:center; gap:10px; flex:1; min-width:0; }
 .chip-value-controls input[type="number"] { width:76px; min-width:0; flex:0 1 76px; }
 .chip-value-controls input[type="range"] { width:130px; min-width:60px; flex:1; padding:0; cursor:pointer; }
+.manual-keyboard { padding:8px 12px; border-top:1px solid var(--border); background:#141a26; color:var(--text); }
+.manual-tools { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:7px; font-size:12px; }
+.manual-tools button { border:1px solid #46516b; background:#283247; color:#eee; border-radius:4px; padding:4px 8px; cursor:pointer; }
+.manual-tools label { display:flex; align-items:center; gap:5px; }
+.manual-tools input { width:90px; }
+.manual-tools [data-rec].recording { background:#9f2943; border-color:#ff6381; }
+.manual-keys { position:relative; height:102px; max-width:1000px; min-width:280px; margin:auto; user-select:none; touch-action:none; }
+.manual-key { position:absolute; top:0; padding:0; cursor:pointer; border-radius:0 0 5px 5px; display:flex; flex-direction:column; justify-content:flex-end; align-items:center; gap:2px; touch-action:none; }
+.manual-key.white { height:100%; background:linear-gradient(#fff,#d5dce8); color:#222a3a; border:1px solid #7b8496; box-shadow:inset 0 -6px #a7b0c2,0 3px 2px #0009; padding-bottom:9px; z-index:1; }
+.manual-key.black { height:65%; background:linear-gradient(#263046,#050810); color:#d5e6ff; border:1px solid #050810; box-shadow:inset 0 -5px #000,0 3px 3px #0009; padding-bottom:7px; z-index:2; }
+.manual-key[aria-pressed="true"] { transform:translateY(3px); background:linear-gradient(#37638a,#7ab9e5); box-shadow:inset 0 3px 5px #0009; color:white; }
+.manual-key span { font-size:10px; pointer-events:none; }
+.manual-key small { font-size:9px; pointer-events:none; opacity:.7; }
+.manual-keyboard > small { display:block; font-size:10px; color:var(--text-mut); margin-top:7px; }
+#prKeyboard.active { color:#87caff; background:#243d56; }
+#prKeyboardHost { flex:none; }

@@ -62,6 +62,8 @@ const commitEdit = () => {
     if (currentSequence && history.commit(currentSequence.toJSON(0))) syncHistory();
 };
 function restoreEdit(action) {
+    // Finish a live take before moving the history cursor.
+    pianoRoll?.stop();
     const snapshot = history[action]();
     if (!snapshot) return;
     arrangerView?.stop(); pianoRoll?.stop();
@@ -139,6 +141,7 @@ function mountQuickTempo() {
 }
 
 function useSequence(sequence, name = null, { keepHistory = false } = {}) {
+    pianoRoll?.stop();
     arrangerView?.stop();
     currentSequence = sequence;
     if (name) sequence.name = name;

@@ -1,3 +1,6 @@
+import { mountManualKeyboard } from '../ui/manualKeyboard.js';
+import { startManualVoice, silenceManualVoices } from '../core/manualVoice.js';
+import { recordedSegments } from './liveRecording.js';
 import { prepareChipBank } from '../core/synth.js';
 import { mountAutomationEditor } from '../ui/automationEditor.js';
 import { choosePitchFix } from '../ui/fixNotesDialog.js';
@@ -64,6 +67,7 @@ export function mountPianoRoll(rootEl, opts = {}) {
                     <input id="prPatternBars" type="number" min="1" max="1024" step="1" aria-label="Pattern length in bars">
                 </label>
                 <button id="prDeletePattern" class="pr-t-btn" type="button" title="Delete pattern and all its clips">Delete pattern</button>
+                <button id="prKeyboard" class="pr-t-btn" type="button" aria-pressed="false" title="Play the current sound with mouse or computer keyboard">▥ Piano</button>
                 <button id="prAudioEffects" class="pr-t-btn" type="button" title="Shared audio effect parameters">Audio FX…</button>
                 <button id="prEffects" class="pr-t-btn" type="button" aria-pressed="false">Automation</button>
                 <button id="prGenerate" class="pr-t-btn" type="button" title="Generate notes for this pattern"><span class="material-icon" aria-hidden="true">auto_awesome</span> Generate</button>
@@ -103,6 +107,7 @@ export function mountPianoRoll(rootEl, opts = {}) {
                 <p>Shown on the pattern’s clips in the arrangement. Not played or exported to MIDI.</p>
             </section>
             <div class="pr-canvas-wrap"><canvas id="prCanvas" tabindex="0" aria-label="Piano roll. Click its ruler to position playback or paste."></canvas></div>
+            <div id="prKeyboardHost"></div>
             <div id="prEditStatus" class="pr-edit-status" role="status">Ctrl/Cmd+C, X, V · Click the ruler to position playback or paste</div>
             <div class="pr-scrollbar hidden" id="prScrollBar">
                 <input id="prScrollInput" type="range" min="0" max="1000" value="0" step="1">
@@ -157,6 +162,10 @@ export function mountPianoRoll(rootEl, opts = {}) {
     let playbackRequest = 0;
     let seekingUntil = 0;
     let clipboard = null;
+    let manualKeyboard = null;
+    let takeChanged = false;
+    let recordTick = 0, recordLastLocal = null;
+    const heldRecordings = new Set();
 
     const getSeq = () => getSequence?.();
     const getChannel = () => state.channel;
@@ -462,9 +471,27 @@ export function mountPianoRoll(rootEl, opts = {}) {
         ctx.strokeRect(0.5, 0.5, LABEL_W - 1, HEADER_H - 1);
     };
 
+    const recordingPosition = () => {
+        const transport = getSequencer();
+        if (!state.playing || state.loading || transport?.paused || !state.clock) return recordTick;
+        const local = Math.max(0, Math.min(loopTicks(), state.clock.toTicks(transport.currentTime)));
+        if (recordLastLocal === null) recordTick = local;
+        else {
+            const delta = local - recordLastLocal;
+            recordTick += delta >= 0 ? delta : state.loopEnabled ? loopTicks() + delta : 0;
+        }
+        recordLastLocal = local;
+        return recordTick;
+    };
     const frame = () => {
+        if (manualKeyboard?.armed && state.playing) {
+            const position = recordingPosition();
+            for (const recording of heldRecordings) recording.preview.dur = Math.max(1, Math.min(recording.pattern.lengthTicks-recording.preview.tick, position-recording.start));
+            if (heldRecordings.size) dirty = true;
+        }
         const seq = getSequencer();
         if (state.playing && !state.loading && seq?.isFinished) {
+            manualKeyboard?.flush();
             state.cursorTick = loopTicks();
             state.playing = false;
             playBtn.classList.remove('active');
@@ -545,6 +572,8 @@ export function mountPianoRoll(rootEl, opts = {}) {
     };
 
     const pushToSequencer = async (keepPlaying = false) => {
+        manualKeyboard?.flush();
+        recordLastLocal = null;
         const seq = getSeq();
         const pattern = getPattern();
         if (isComment() || !seq || !pattern || !state.visible || rootEl.inert || state.loading) return;
@@ -556,8 +585,12 @@ export function mountPianoRoll(rootEl, opts = {}) {
             const placement = seq.arrangement.find(p => p.id === state.placementId && p.patternId === pattern.id)
                 ?? seq.arrangement.filter(p => p.patternId === pattern.id).reduce((first, p) => !first || p.startTick < first.startTick ? p : first, null);
             const soloAt = placement?.startTick ?? state.anchorTick;
-            const { startTick, midi } = mix ? writePatternMixMIDI(seq, pattern.id, { ...options, placementId: state.placementId, anchorTick: state.anchorTick })
+            let { startTick, midi } = mix ? writePatternMixMIDI(seq, pattern.id, { ...options, placementId: state.placementId, anchorTick: state.anchorTick })
                 : { startTick: soloAt, midi: pattern.notes.length ? writePatternMIDI(seq, pattern.id, soloAt, options) : null };
+            if (!midi && manualKeyboard?.armed) {
+                startTick = soloAt;
+                midi = writePatternMIDI(seq, pattern.id, soloAt, options);
+            }
             if (!midi) {
                 if (state.playing) stop(false);
                 $('#prEditStatus').textContent = mix ? 'No notes in this part of the arrangement.' : 'No notes in this pattern.';
@@ -599,6 +632,8 @@ export function mountPianoRoll(rootEl, opts = {}) {
     const play = () => pushToSequencer(true);
 
     const stop = (rewind = true) => {
+        manualKeyboard?.flush();
+        recordLastLocal = null;
         playbackRequest++;
         if (rewind) state.cursorTick = 0;
         state.loading = playBtn.disabled = false;
@@ -624,6 +659,8 @@ export function mountPianoRoll(rootEl, opts = {}) {
     };
 
     const seekTick = (tick, reveal = false) => {
+        manualKeyboard?.flush();
+        recordLastLocal = null;
         if (!getPattern()) return;
         state.cursorTick = Math.max(0, Math.min(loopTicks(), Math.round(tick)));
         const seq = getSequencer();
@@ -949,7 +986,49 @@ export function mountPianoRoll(rootEl, opts = {}) {
     const automationEditor = mountAutomationEditor({ host: wrap, button: $('#prEffects'), getPattern,
         onCommit: () => { dirty = true; scheduleHotReload(); onEdit?.(); },
     });
+    manualKeyboard = mountManualKeyboard({
+        host: $('#prKeyboardHost'), button: $('#prKeyboard'),
+        getContext: () => ({ enabled: state.visible && !rootEl.inert && !isComment() && !!getPattern(),
+            identity: getPattern(), sequence: getSeq(), channel: getChannelInfo() }),
+        startVoice: (context, key, velocity, isCurrent) => startManualVoice(context.sequence, context.channel, key, velocity, isCurrent),
+        onStart: (key, armed, velocity) => {
+            if (!armed || !state.playing || state.loading || getSequencer()?.paused) return null;
+            const sequence = getSeq(), pattern = getPattern(), start = recordingPosition();
+            const tick = Math.max(0, Math.min(pattern.lengthTicks-1, Math.round((start % pattern.lengthTicks) / snapQuantum()) * snapQuantum()));
+            const preview = sequence.addNote(pattern.id, { track: getChannel(), key, tick: Math.round(tick), dur: 1, vel: velocity });
+            const recording = { sequence, pattern, start, preview, quantum: snapQuantum(), velocity };
+            heldRecordings.add(recording); takeChanged = dirty = true;
+            const row = layer().pitchMax - key;
+            const y = rowToY(row);
+            if (y < HEADER_H || y >= wrap.clientHeight - ROW_H) {
+                state.scrollY = Math.max(0, row * ROW_H - wrap.clientHeight / 2);
+                clampScrollY();
+            }
+            return recording;
+        },
+        onEnd: (key, recording) => {
+            heldRecordings.delete(recording);
+            const end = recordingPosition();
+            const { sequence, pattern, preview } = recording;
+            pattern.notes = pattern.notes.filter(n => n !== preview);
+            for (const segment of recordedSegments(recording.start, end, pattern.lengthTicks, recording.quantum)) {
+                sequence.addNote(pattern.id, { ...segment, key, track: pattern.channel, vel: recording.velocity });
+            }
+            dirty = true;
+            $('#prEditStatus').textContent = 'Recorded notes · Stop or turn REC off to finish the take (one Undo).';
+        },
+        onFlush: () => {
+            silenceManualVoices();
+            if (takeChanged) { takeChanged = false; onEdit?.(); scheduleHotReload(); }
+        },
+        onRecordChange: armed => {
+            recordLastLocal = null;
+            $('#prEditStatus').textContent = armed ? 'REC armed · Start playback, then play the keyboard. Existing notes are kept.' : 'REC off · Keyboard is for audition only.';
+        },
+        onError: error => { $('#prEditStatus').textContent = error.message; },
+    });
     const refreshHeader = () => {
+        manualKeyboard.refresh();
         automationEditor.refresh();
         const channel = getChannelInfo();
         const pattern = getPattern();
@@ -1292,6 +1371,8 @@ export function mountPianoRoll(rootEl, opts = {}) {
 		root: rootEl,
         getChannel: () => state.channel,
         setChannel(channel, placement) {
+            manualKeyboard?.flush();
+            recordLastLocal = null;
             state.channel = channel;
             state.placementId = placement?.id ?? null;
             state.anchorTick = placement?.startTick ?? 0;
@@ -1306,6 +1387,7 @@ export function mountPianoRoll(rootEl, opts = {}) {
         play,
         stop,
         destroy() {
+            manualKeyboard?.destroy();
             cancelAnimationFrame(rafId);
             ro.disconnect();
             stop();
@@ -1317,6 +1399,6 @@ export function mountPianoRoll(rootEl, opts = {}) {
             window.removeEventListener('resize', resizeCanvas);
             pickerEl?.remove();
         },
-        setVisible(v) { state.visible = v; },
+        setVisible(v) { if (!v) manualKeyboard?.flush(); state.visible = v; manualKeyboard?.refresh(); },
     };
 }
