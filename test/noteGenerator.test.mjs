@@ -95,3 +95,22 @@ test('genre bass presets use different rhythmic shapes and complement in-key mel
     assert.ok(melody.every(n => n.key > 60 && scale.includes(n.key % 12)));
     assert.ok(inRange([...techno, ...trance, ...melody], args.lengthTicks));
 });
+
+test('melodic sections change phrasing for bass, melody, arpeggios and chords without escaping key or bounds', () => {
+    for (const style of ['bass', 'melody', 'arpeggio', 'chords', 'syncopated']) {
+        for (const lengthTicks of [1, 60, 1920, 2600, 7680]) {
+            const args = { ...base, style, lengthTicks, mode: 'minor', tonic: 2, preset: 'techno', random: () => .2 };
+            const main = generatePatternNotes(args);
+            for (const section of ['intro', 'breakdown', 'fill', 'ending']) {
+                const notes = generatePatternNotes({ ...args, section });
+                assert.ok(notes.length > 0);
+                assert.ok(inRange(notes, lengthTicks));
+                assert.ok(notes.every(n => [0, 2, 3, 5, 7, 8, 10].includes((n.key - 2 + 120) % 12)));
+                assert.ok(notes.every(n => Number.isInteger(n.tick) && Number.isInteger(n.dur) && n.vel > 0 && n.vel <= 127));
+                if (section === 'ending') assert.ok(notes.some(n => n.tick >= Math.floor(lengthTicks / 2) && n.key % 12 === 2));
+                if (section === 'intro' || section === 'breakdown') assert.ok(notes.length <= main.length);
+                if (lengthTicks >= 1920) assert.notDeepEqual(notes, main);
+            }
+        }
+    }
+});

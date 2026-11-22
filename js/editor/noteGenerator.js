@@ -84,6 +84,8 @@ const grooves = {
     jazz: ['Jazz / Swing', [[0, 8]], [4, 12], [0, 4, 7, 8, 12, 15], { ghosts: [7, 15], soft: true, hatKey: 51 }],
 };
 export const DRUM_GROOVES = Object.entries(grooves).map(([id, [label]]) => [label, id]);
+export const MELODIC_SECTIONS = [['Main phrase', 'main'], ['Intro', 'intro'], ['Breakdown / sparse', 'breakdown'], ['Transition / Fill', 'fill'], ['Ending', 'ending']];
+
 export const DRUM_SECTIONS = [['Full groove', 'main'], ['Intro', 'intro'], ['Breakdown', 'breakdown'], ['Transition / Fill', 'fill'], ['Ending', 'ending']];
 
 function buildDrums({ style, section, random, lengthTicks, ticksPerBar, steps, step, add }) {
@@ -208,7 +210,40 @@ export function generatePatternNotes({ lengthTicks, ticksPerBar, stepsPerBar = 1
             }
         }
     }
-    return notes.sort((a, b) => a.tick - b.tick || a.key - b.key);
+    const result = !isDrum ? shapeMelodicSection(notes, { section, style, lengthTicks, ticksPerBar, tonic, mode, step }) : notes;
+    return result.sort((a, b) => a.tick - b.tick || a.key - b.key);
+}
+
+// Section variations alter phrasing, not the channel gain or automation.
+function shapeMelodicSection(notes, { section, style, lengthTicks, ticksPerBar, tonic, mode, step }) {
+    if (!MELODIC_SECTIONS.some(([, id]) => id === section) || section === 'main') return notes;
+    const onsets = [...new Set(notes.map(n => n.tick))].sort((a, b) => a - b);
+    if (section === 'intro' || section === 'breakdown') {
+        const stride = section === 'intro' ? 2 : 3;
+        const kept = onsets.filter((_, i) => i % stride === 0);
+        const ends = new Map(kept.map((tick, i) => [tick, kept[i + 1] ?? lengthTicks]));
+        return notes.filter(n => ends.has(n.tick)).map(n => ({ ...n,
+            dur: Math.min(ends.get(n.tick) - n.tick, Math.max(n.dur, Math.round(step * (section === 'intro' ? 1.5 : 3)))),
+            vel: Math.max(1, Math.round(n.vel * (section === 'intro' ? .78 + .18 * n.tick / lengthTicks : .68))),
+        }));
+    }
+    // Last half-bar becomes a pickup or a resolved tonic cadence.
+    const boundary = Math.max(0, lengthTicks - Math.min(Math.ceil(ticksPerBar / 2), Math.ceil(lengthTicks / 2)));
+    const lead = notes.filter(n => n.tick < boundary).map(n => ({ ...n, dur: Math.min(n.dur, boundary - n.tick) }));
+    if (section === 'ending') {
+        const base = style === 'bass' ? 36 : 60;
+        const keys = ['chords', 'syncopated'].includes(style) ? [0, 2, 4] : [0];
+        return [...lead, ...keys.map(degree => ({ key: scaleTone(tonic, mode, degree, base), tick: boundary,
+            dur: Math.max(1, Math.floor((lengthTicks - boundary) * .8)), vel: 86 }))];
+    }
+    const pulse = Math.max(1, Math.round(step));
+    const base = style === 'bass' ? 36 : 60;
+    const scaleRun = mode === 'minor' ? [4, 5, 6, 7, 6, 4, 1, 6] : [4, 5, 6, 7, 6, 4, 2, 6];
+    for (let tick = boundary, i = 0; tick < lengthTicks; tick += pulse, i++) {
+        lead.push({ key: scaleTone(tonic, mode, scaleRun[i % scaleRun.length], base), tick,
+            dur: Math.min(lengthTicks - tick, Math.max(1, Math.round(pulse * .72))), vel: Math.min(115, 88 + i * 2) });
+    }
+    return lead;
 }
 
 // Ignore generated notes that would collide with a note already sounding on the same pitch.

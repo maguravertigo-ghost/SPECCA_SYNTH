@@ -1,4 +1,4 @@
-import { TONICS, DRUM_GROOVES, DRUM_SECTIONS, MUSIC_PRESETS } from '../editor/noteGenerator.js';
+import { TONICS, DRUM_GROOVES, DRUM_SECTIONS, MELODIC_SECTIONS, MUSIC_PRESETS } from '../editor/noteGenerator.js';
 
 export function chooseGeneratedNotes({ isDrum, hasNotes, defaults = {} }) {
     return new Promise(resolve => {
@@ -12,7 +12,7 @@ export function chooseGeneratedNotes({ isDrum, hasNotes, defaults = {} }) {
                 <label class="arr-field"><span>Scale</span><select name="mode"><option value="major">Major</option><option value="minor">Minor</option></select></label>`}
                 <label class="arr-field"><span>${isDrum ? 'Groove' : 'Rhythm'}</span><select name="style"></select></label>
                 ${!isDrum ? '<label class="arr-field"><span>Genre</span><select name="preset"><option value="">Classic / neutral</option></select></label>' : ''}
-                ${isDrum ? `<label class="arr-field"><span>Section</span><select name="section"></select></label>` : ''}
+                <label class="arr-field"><span>Section</span><select name="section"></select></label>
                 ${hasNotes ? `<label class="arr-field"><span>Existing notes</span><select name="operation"><option value="replace">Replace</option><option value="append">Keep and add</option></select></label>` : ''}
                 <p class="muted">Fills the current pattern with editable notes. Undo restores the previous notes.</p>
             </div>
@@ -31,10 +31,9 @@ export function chooseGeneratedNotes({ isDrum, hasNotes, defaults = {} }) {
             : [['Chords', 'chords'], ['Melody', 'melody'], ['Bass line', 'bass'], ['Arpeggio', 'arpeggio'], ['Syncopated chords', 'syncopated']];
         fields.style.replaceChildren(...rhythms.map(args => new Option(...args)));
         if (rhythms.some(([, value]) => defaults.style === value)) fields.style.value = defaults.style;
-        if (isDrum) {
-            fields.section.replaceChildren(...DRUM_SECTIONS.map(args => new Option(...args)));
-            if (DRUM_SECTIONS.some(([, value]) => defaults.section === value)) fields.section.value = defaults.section;
-        }
+        const sections = isDrum ? DRUM_SECTIONS : MELODIC_SECTIONS;
+        fields.section.replaceChildren(...sections.map(args => new Option(...args)));
+        if (sections.some(([, value]) => defaults.section === value)) fields.section.value = defaults.section;
         dialog.addEventListener('close', () => {
             const result = dialog.returnValue === 'generate' ? {
                 style: fields.style.value, section: fields.section?.value, preset: fields.preset?.value, tonic: Number(fields.tonic?.value ?? 0), mode: fields.mode?.value,
