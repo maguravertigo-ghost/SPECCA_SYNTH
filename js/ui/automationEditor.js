@@ -16,7 +16,7 @@ export function mountAutomationEditor({ host, button, getPattern, onCommit }) {
     function render(){
         const p=getPattern(); button.hidden=!p;button.disabled=!p;
         const labels=Object.entries(AUTOMATION).filter(([key])=>p?.automation?.[key]).map(([key,s])=>`${s.name}${p.automation[key].bypass?' (off)':''}`);
-        button.textContent=`Effects${labels.length?' · '+labels.join(' / '):''}`;button.classList.toggle('active',active);button.setAttribute('aria-pressed',String(active));
+        button.textContent=`Automation${labels.length?' · '+labels.join(' / '):''}`;button.classList.toggle('active',active);button.setAttribute('aria-pressed',String(active));
         panel.hidden=!active||!p;
         const c=curve(), spec=AUTOMATION[id()];smooth.checked=!!c?.smooth;bypass.checked=!!c?.bypass;
         svg.style.color=spec.color;

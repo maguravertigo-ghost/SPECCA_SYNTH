@@ -170,7 +170,7 @@ export class Sequence {
         const order = [...used];
         order.splice(order.indexOf(channel) + 1, 0, lane);
         this.channelOrder = order;
-        const clone = { ...source, channel: lane, name, created: true };
+        const clone = { ...structuredClone(source), channel: lane, name, created: true };
         this.channels = this.channels.filter(c => c.channel !== lane);
         this.channels.push(clone);
         delete this.patternCounters[lane];
@@ -181,6 +181,7 @@ export class Sequence {
             const suffix = original.name?.replace(/^\d+\.\d+\s*(?:·\s*)?/, '');
             if (suffix) copy.name += ` · ${suffix}`;
             copy.lengthTicks = original.lengthTicks;
+            if (original.automation) copy.automation = structuredClone(original.automation);
             if (original.comment !== undefined) copy.comment = original.comment;
             copy.notes = original.notes.map(n => ({ ...n, id: makeId('n'), track: lane }));
             copies.set(original.id, copy.id);

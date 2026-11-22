@@ -1,3 +1,4 @@
+import { buildChipBank } from '../editor/chiptune.js';
 import { EFFECTS, effectMessages, effectSend } from '../editor/audioEffects.js';
 // js/core/synth.js
 import { WorkletSynthesizer, Sequencer } from '../../main.min.js';
@@ -82,6 +83,20 @@ export function applyProjectEffects(sequence) {
         const info=sequence.channels.find(c=>c.channel===lane);
         if(info) for(const [id,spec] of Object.entries(EFFECTS)) synth.controllerChange(index,spec.cc,effectSend(info,id));
     }
+}
+
+let chipSignature = null;
+let chipInstall = Promise.resolve();
+export function prepareChipBank(sequence) {
+    const voices=sequence.channels.filter(c=>c.source==='chiptune' && c.kind!=='comment');
+    const signature=JSON.stringify(voices.map(c=>({channel:c.channel,chip:c.chip})));
+    const install=chipInstall.catch(()=>{}).then(async()=>{
+        if(!synth || signature===chipSignature)return;
+        const bank=buildChipBank(voices);
+        if(bank)await synth.soundBankManager.addSoundBank(bank,'spessa-chip',0);
+        chipSignature=signature;
+    });
+    chipInstall=install;return install;
 }
 
 export function applyChannelMix(sequence) {
@@ -251,6 +266,7 @@ export async function initSynth() {
         } catch (error) {
             try { candidate?.destroy(); } catch {}
             if (context && context.state !== 'closed') context.close().catch(() => {});
+            chipSignature = null;
             ctx = synth = seq = previewSeq = masterGain = analyser = sampleFrame = null;
             reportAudio('error', error?.message ?? String(error));
             throw error;
@@ -312,6 +328,10 @@ export async function loadSong(buffer, name = '', target = seq, isCurrent = () =
 
 async function loadSongInternal(seq, buffer, name) {
     resetLiveMix();
+    if (seq === previewSeq && synth.soundBankManager.soundBankList.some(b => b.id === 'spessa-chip')) {
+        await synth.soundBankManager.deleteSoundBank('spessa-chip');
+        chipSignature = null;
+    }
     // A load never inherits a running transport from the previous file.
     seq.pause();
 

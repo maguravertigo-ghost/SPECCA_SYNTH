@@ -31,6 +31,7 @@ export function sameInstrument(a, b) {
 }
 
 export function instrumentLabel(channel, catalog) {
+    if (channel?.source === 'chiptune') return `Chiptune · ${channel.chip?.name || channel.chip?.wave || 'Pulse'}`;
     if (channel?.presetName) return channel.presetName;
     return catalog.find(p => sameInstrument(p, channel))?.name ?? `${instrumentFamily(channel)} / ${channel?.program ?? 0}`;
 }
@@ -42,7 +43,7 @@ export function adaptToSoundfont(sequence, presets) {
     const list = presets.filter(p => !p.isDrum || p.isGMGSDrum);
     let substitutions = 0;
     for (const channel of sequence.channels) {
-        if (channel.kind === 'comment' || channel.created === false || list.some(p => sameInstrument(p, channel))) continue;
+        if (channel.source === 'chiptune' || channel.kind === 'comment' || channel.created === false || list.some(p => sameInstrument(p, channel))) continue;
         const candidates = list.filter(p => !!p.isDrum === !!channel.isDrum);
         const fallback = candidates.find(p => p.program === channel.program && !p.bankMSB && !p.bankLSB)
             ?? candidates.find(p => p.program === channel.program)

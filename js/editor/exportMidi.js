@@ -1,3 +1,4 @@
+import { chipPatch } from './chiptune.js';
 import { EFFECTS, effectMessages, effectSend } from './audioEffects.js';
 import { automationEvents } from './automation.js';
 // One MIDI writer for the pattern preview and the complete arrangement.
@@ -65,7 +66,8 @@ function writeSequence(sequence, clips, { loop = null, respectMute = false, live
     if (parts.size) for (const message of effectMessages(sequence.effects)) sysex(message, -4.5, Math.min(...parts.keys()));
     for (const lane of active) {
         const part = trackKey(lane), ch = lane % 16;
-        const info = sequence.channels.find(c => c.channel === lane) ?? {};
+        const original = sequence.channels.find(c => c.channel === lane) ?? {};
+        const info = original.source === 'chiptune' ? { ...original, ...(liveMix ? chipPatch(original.channel) : { bankMSB: 0, bankLSB: 0, program: original.chip?.wave === 'triangle' ? 38 : original.chip?.wave === 'noise' ? 119 : 80, isDrum: false }) } : original;
         if (sequence.effects) for (const [id,spec] of Object.entries(EFFECTS)) emit(0, -1, [0xb0 | ch, spec.cc, effectSend(info,id)], part);
         const isDrum = info.isDrum ?? (ch === 9);
         if (isDrum !== (ch === 9)) sysex(gsMessage(0x10 | gsPart(ch), 0x15, isDrum ? 1 : 0), -5, part);

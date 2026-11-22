@@ -1,3 +1,4 @@
+import { prepareChipBank } from '../core/synth.js';
 import { mountAutomationEditor } from '../ui/automationEditor.js';
 import { choosePitchFix } from '../ui/fixNotesDialog.js';
 // js/editor/pianoRoll.js
@@ -64,7 +65,7 @@ export function mountPianoRoll(rootEl, opts = {}) {
                 </label>
                 <button id="prDeletePattern" class="pr-t-btn" type="button" title="Delete pattern and all its clips">Delete pattern</button>
                 <button id="prAudioEffects" class="pr-t-btn" type="button" title="Shared audio effect parameters">Audio FX…</button>
-                <button id="prEffects" class="pr-t-btn" type="button" aria-pressed="false">Effects</button>
+                <button id="prEffects" class="pr-t-btn" type="button" aria-pressed="false">Automation</button>
                 <button id="prGenerate" class="pr-t-btn" type="button" title="Generate notes for this pattern"><span class="material-icon" aria-hidden="true">auto_awesome</span> Generate</button>
                 <button id="prFixNotes" class="pr-t-btn" type="button" title="Correct out-of-scale pitches">FIX</button>
             </div>
@@ -563,6 +564,7 @@ export function mountPianoRoll(rootEl, opts = {}) {
                 return;
             }
             await initSynth();
+            await prepareChipBank(seq);
             if (request !== playbackRequest) return;
             const sequencer = getSequencer();
             if (!await loadSong(midi, pattern.name, sequencer, () => request === playbackRequest && state.visible && !rootEl.inert)) return;

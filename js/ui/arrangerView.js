@@ -1,3 +1,4 @@
+import { prepareChipBank } from '../core/synth.js';
 import { automationPreview, automationSummary } from '../editor/automation.js';
 // js/ui/arrangerView.js
 import { log, setStatus } from '../core/log.js';
@@ -814,6 +815,7 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
 
         try {
             await initSynth();
+            await prepareChipBank(s);
             if (!current()) return;
             const seq = getSequencer();
             const resume = !playbackDirty && reload !== true && loadedSequence === s && pausedByUser && !seq.isFinished;
