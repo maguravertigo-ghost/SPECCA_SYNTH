@@ -1,6 +1,6 @@
 {
   "name": "SPECCA_SYNTH",
-  "version": "1.11.0",
+  "version": "1.12.0",
   "main": "server.js",
   "scripts": {
     "test": "node --test",

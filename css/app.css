@@ -1197,3 +1197,12 @@ input, textarea, [contenteditable="true"], .log-box { user-select: text; }
 #arrAutomationView { width:auto; padding:0 9px; font-size:11px; }
 #arrAutomationView.active { background:#285d85; color:white; }
 .mixer-automation { grid-column:1 / -1; display:flex; gap:10px; flex-wrap:wrap; font-size:11px; color:var(--text-mut); padding-bottom:6px; border-bottom:1px solid var(--border); }
+.audio-effects-dialog { width:min(960px,95vw); max-height:90vh; overflow:auto; }
+.audio-effects-panels { display:grid; grid-template-columns:repeat(auto-fit,minmax(235px,1fr)); gap:14px; }
+.audio-effects-panels fieldset { min-width:0; border:1px solid var(--border); border-radius:6px; padding:12px; }
+.effect-parameter { display:grid; grid-template-columns:1fr 3ch; gap:4px 8px; margin-top:12px; }
+.effect-parameter span { grid-column:1 / -1; font-size:12px; }
+.effect-parameter input { width:100%; }
+.mixer-sends { grid-column:1 / -1; display:grid; gap:6px; }
+.mixer-sends label { display:grid; grid-template-columns:55px 1fr 3ch; gap:8px; align-items:center; font-size:11px; }
+.mixer-sends input { width:100%; }

@@ -971,6 +971,7 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
     return {
         root: rootEl,
         refresh: () => { markDirty(); },
+        refreshAudio: updatePlayback,
         play, pause, stop,
         reset() {
             loadedSequence = null;

@@ -1,3 +1,4 @@
+import { EFFECTS, effectMessages, effectSend } from '../editor/audioEffects.js';
 // js/core/synth.js
 import { WorkletSynthesizer, Sequencer } from '../../main.min.js';
 import { createSoundFontSource } from './soundFontSource.js';
@@ -74,7 +75,17 @@ export function applyChannelVolume(info) {
     if (slot) applyLiveMix(slot.index, info);
 }
 
+export function applyProjectEffects(sequence) {
+    if (!synth || !sequence?.effects) return;
+    for (const message of effectMessages(sequence.effects)) synth.systemExclusive(message);
+    for (const {lane,index} of getMidiMixChannels(seq)) {
+        const info=sequence.channels.find(c=>c.channel===lane);
+        if(info) for(const [id,spec] of Object.entries(EFFECTS)) synth.controllerChange(index,spec.cc,effectSend(info,id));
+    }
+}
+
 export function applyChannelMix(sequence) {
+    applyProjectEffects(sequence);
     const channels = new Map(sequence.channels.map(c => [c.channel, c]));
     for (const { lane, index } of getMidiMixChannels(seq)) {
         if (channels.has(lane)) applyLiveMix(index, channels.get(lane));

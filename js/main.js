@@ -1,3 +1,6 @@
+import { openAudioEffects } from './ui/audioEffectsDialog.js';
+import { defaultEffects } from './editor/audioEffects.js';
+import { applyProjectEffects } from './core/synth.js';
 import { automationSummary } from './editor/automation.js';
 import { mountSoundFontLibrary } from './ui/soundFontLibrary.js';
 // js/main.js
@@ -63,11 +66,22 @@ function restoreEdit(action) {
     if (!snapshot) return;
     arrangerView?.stop(); pianoRoll?.stop();
     currentSequence = Sequence.fromJSON(snapshot);
+    applyProjectEffects({ ...currentSequence, effects: currentSequence.effects ?? defaultEffects() });
     const channel = pianoRoll?.getChannel();
     if (channel != null && !currentSequence.channels.some(c => c.channel === channel)) showArranger();
     refreshAll(); syncHistory();
 }
+const commitEffects = () => {
+    commitEdit();
+    arrangerView?.refreshAudio?.();
+    pianoRoll?.refreshAudio?.();
+};
+const showAudioEffects = () => openAudioEffects({ getSequence: () => currentSequence,
+    onChange: () => applyProjectEffects(currentSequence), onCommit: commitEffects });
 const showProjectMixer = () => openMixer({ title: 'Project mixer', showPan: true,
+    onEffects: showAudioEffects,
+    onSendCommit: commitEffects,
+    onSendChange: () => { currentSequence.effects ??= defaultEffects(); applyProjectEffects(currentSequence); },
     getAutomation: channel => automationSummary(currentSequence.patterns.filter(p => p.channel === channel.channel)),
     channels: currentSequence.orderedChannels().filter(c => c.kind !== 'comment'),
     onChange: channel => {
@@ -240,6 +254,7 @@ if (editorRoot) {
         onPatternSelect: (channel, id) => selectedPatterns.set(channel, id),
         onEdit: commitEdit,
         onMixer: showProjectMixer,
+        onAudioEffects: showAudioEffects,
         onInstrumentChange: () => arrangerView?.refresh(),
         onBackToArranger:     () => showArranger(),
     });
@@ -251,6 +266,7 @@ if (arrangerRoot) {
         onSelectPattern: (channel, id) => selectedPatterns.set(channel, id),
         onEdit: commitEdit,
         onMixer: showProjectMixer,
+        onAudioEffects: showAudioEffects,
         onOpenChannel: (channel, patternId, placement) => {
             if (patternId) selectedPatterns.set(channel, patternId);
             if (!currentSequence.getChannelPattern(channel)) { currentSequence.ensureChannelPattern(channel); commitEdit(); }

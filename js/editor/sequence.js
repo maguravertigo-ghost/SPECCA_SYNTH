@@ -13,6 +13,7 @@ export class Sequence {
         this.name = data.name ?? 'Untitled';
         this.tempo = data.tempo ?? 120;
         this.tempoChanges = data.tempoChanges ?? [];
+        this.effects = data.effects ?? null;
         this.timeDivision = data.timeDivision ?? DEFAULT_TPQ;
         this.stepsPerBar = data.stepsPerBar ?? 16;
         this.patternLengthTicks = data.patternLengthTicks ?? this.timeDivision * 4 * 4;
@@ -63,6 +64,7 @@ export class Sequence {
             name: this.name,
             tempo: this.tempo,
             tempoChanges: this.tempoChanges,
+            effects: this.effects,
             timeDivision: this.timeDivision,
             stepsPerBar: this.stepsPerBar,
             patternLengthTicks: this.patternLengthTicks,

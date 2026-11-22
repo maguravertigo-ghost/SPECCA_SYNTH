@@ -1,4 +1,5 @@
-export function openMixer({ title = 'Mixer', channels, onChange, onCommit, showPan = false, getAutomation = null } = {}) {
+import { EFFECTS, effectSend } from '../editor/audioEffects.js';
+export function openMixer({ title = 'Mixer', channels, onChange, onCommit, showPan = false, getAutomation = null, onEffects = null, onSendChange = null, onSendCommit = null } = {}) {
     const dialog = document.createElement('dialog');
     dialog.className = 'arr-dialog-box mixer-dialog app-dialog';
     dialog.setAttribute('aria-label', title);
@@ -10,6 +11,9 @@ export function openMixer({ title = 'Mixer', channels, onChange, onCommit, showP
         <footer class="arr-dialog-footer"><button class="btn btn-primary">Close</button></footer>
     </form>`;
     dialog.querySelector('h2').textContent = title;
+    if (onEffects) {
+        const button=document.createElement('button');button.type='button';button.className='btn';button.textContent='Audio effects…';button.addEventListener('click',onEffects);dialog.querySelector('header').append(button);
+    }
     const list = dialog.querySelector('.mixer-list');
     const all = dialog.querySelector('.mixer-all');
     const refreshRows = [];
@@ -69,6 +73,17 @@ export function openMixer({ title = 'Mixer', channels, onChange, onCommit, showP
             pan.addEventListener('input', () => { channel.pan = Number(pan.value); updatePan(); onChange(channel); });
             pan.addEventListener('change', () => onCommit?.());
             pan.addEventListener('dblclick', () => { pan.value = 64; channel.pan = 64; updatePan(); onChange(channel); onCommit?.(); });
+        }
+        if (onSendChange) {
+            const sends=document.createElement('div');sends.className='mixer-sends';
+            for(const [id,spec] of Object.entries(EFFECTS)) {
+                const row=document.createElement('label');row.textContent=spec.name;
+                const slider=document.createElement('input');slider.type='range';slider.min=0;slider.max=127;slider.value=effectSend(channel,id);slider.setAttribute('aria-label',`${spec.name} send ${name.textContent}`);
+                const output=document.createElement('output');output.value=slider.value;
+                slider.addEventListener('input',()=>{channel.sends??={};channel.sends[id]=Number(slider.value);output.value=slider.value;onSendChange(channel);});
+                slider.addEventListener('change',()=> (onSendCommit ?? onCommit)?.());row.append(slider,output);sends.append(row);
+            }
+            row.append(sends);
         }
         if (getAutomation) {
             const summary = getAutomation(channel);

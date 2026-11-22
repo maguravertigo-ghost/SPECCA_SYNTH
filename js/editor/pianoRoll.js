@@ -47,6 +47,7 @@ export function mountPianoRoll(rootEl, opts = {}) {
         onPatternSelect,
         onInstrumentChange,
         onEdit,
+        onAudioEffects,
         onMixer,
         onBackToArranger,
     } = opts;
@@ -62,6 +63,7 @@ export function mountPianoRoll(rootEl, opts = {}) {
                     <input id="prPatternBars" type="number" min="1" max="1024" step="1" aria-label="Pattern length in bars">
                 </label>
                 <button id="prDeletePattern" class="pr-t-btn" type="button" title="Delete pattern and all its clips">Delete pattern</button>
+                <button id="prAudioEffects" class="pr-t-btn" type="button" title="Shared audio effect parameters">Audio FX…</button>
                 <button id="prEffects" class="pr-t-btn" type="button" aria-pressed="false">Effects</button>
                 <button id="prGenerate" class="pr-t-btn" type="button" title="Generate notes for this pattern"><span class="material-icon" aria-hidden="true">auto_awesome</span> Generate</button>
                 <button id="prFixNotes" class="pr-t-btn" type="button" title="Correct out-of-scale pitches">FIX</button>
@@ -968,6 +970,7 @@ export function mountPianoRoll(rootEl, opts = {}) {
         $('#prPatternField').hidden = !patterns.length;
         $('#prNewPattern').disabled = !channel;
         $('#prDeletePattern').disabled = !pattern;
+        $('#prAudioEffects').hidden = comment;
         $('#prEffects').hidden = comment;
         $('#prGenerate').hidden = comment;
         $('#prGenerate').disabled = !pattern;
@@ -1145,6 +1148,7 @@ export function mountPianoRoll(rootEl, opts = {}) {
     // ------------------------------------------------------------------
 
     playBtn?.addEventListener('click', togglePlay);
+    $('#prAudioEffects').addEventListener('click', () => onAudioEffects?.());
     $('#prMixerBtn').addEventListener('click', () => onMixer?.());
     mixBtn.addEventListener('click', () => {
         state.mixEnabled = !state.mixEnabled;
@@ -1291,6 +1295,7 @@ export function mountPianoRoll(rootEl, opts = {}) {
             state.anchorTick = placement?.startTick ?? 0;
         },
         refreshChannelMute,
+        refreshAudio: scheduleHotReload,
         refresh() {
             refreshHeader();
             resetViewport();

@@ -1,3 +1,4 @@
+import { EFFECTS, effectMessages, effectSend } from './audioEffects.js';
 import { automationEvents } from './automation.js';
 // One MIDI writer for the pattern preview and the complete arrangement.
 function writeVarLen(value) {
@@ -61,9 +62,11 @@ function writeSequence(sequence, clips, { loop = null, respectMute = false, live
 
     const sysex = (bytes, order, part) => emit(0, order, [0xf0, ...writeVarLen(bytes.length), ...bytes], part);
     if (parts.size) sysex(gsMessage(0, 0x7f, 0), -6, Math.min(...parts.keys()));
+    if (parts.size) for (const message of effectMessages(sequence.effects)) sysex(message, -4.5, Math.min(...parts.keys()));
     for (const lane of active) {
         const part = trackKey(lane), ch = lane % 16;
         const info = sequence.channels.find(c => c.channel === lane) ?? {};
+        if (sequence.effects) for (const [id,spec] of Object.entries(EFFECTS)) emit(0, -1, [0xb0 | ch, spec.cc, effectSend(info,id)], part);
         const isDrum = info.isDrum ?? (ch === 9);
         if (isDrum !== (ch === 9)) sysex(gsMessage(0x10 | gsPart(ch), 0x15, isDrum ? 1 : 0), -5, part);
         emit(0, -4, [0xb0 | ch, 0, (info.bankMSB ?? 0) & 0x7f], part);
