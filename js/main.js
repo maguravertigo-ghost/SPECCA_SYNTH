@@ -1,3 +1,4 @@
+import { automationSummary } from './editor/automation.js';
 import { mountSoundFontLibrary } from './ui/soundFontLibrary.js';
 // js/main.js
 import { log, setStatus, wireGlobalErrorHandlers } from './core/log.js';
@@ -67,6 +68,7 @@ function restoreEdit(action) {
     refreshAll(); syncHistory();
 }
 const showProjectMixer = () => openMixer({ title: 'Project mixer', showPan: true,
+    getAutomation: channel => automationSummary(currentSequence.patterns.filter(p => p.channel === channel.channel)),
     channels: currentSequence.orderedChannels().filter(c => c.kind !== 'comment'),
     onChange: channel => {
         applyChannelVolume(channel);

@@ -1,3 +1,4 @@
+import { automationPreview, automationSummary } from '../editor/automation.js';
 // js/ui/arrangerView.js
 import { log, setStatus } from '../core/log.js';
 import { getSequencer, applyChannelVolume, applyChannelMix, initSynth, bindMasterVolume, loadSong } from '../core/synth.js';
@@ -38,6 +39,7 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
                 </div>
                 <output id="arrTime" class="arr-time">0:00.0 / 0:00.0</output>
                 <div class="arr-toolbar-options">
+                    <button id="arrAutomationView" type="button" class="arr-control" aria-pressed="false" title="Show pattern automation curves">Automation view</button>
                     <div class="arr-transport-group" role="group" aria-label="Loop range">
                         <button id="arrLoopAll" class="arr-control" type="button" aria-label="Loop entire track" title="Loop entire track">
                             <svg class="arr-fit-icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -82,6 +84,14 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
     const pauseBtn    = $('#arrPause');
     const loopBtn     = $('#arrLoopBtn');
     const loopAllBtn  = $('#arrLoopAll');
+
+    $('#arrAutomationView').addEventListener('click', () => {
+        const button = $('#arrAutomationView');
+        const active = button.getAttribute('aria-pressed') !== 'true';
+        button.setAttribute('aria-pressed', String(active));
+        button.classList.toggle('active', active);
+        rootEl.classList.toggle('show-automation', active);
+    });
 
     const state = {
         loopEnabled: true,
@@ -260,11 +270,15 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
                 const text = pat.comment?.trim() || '';
                 const label = comment && text ? `${pat.name} · ${text.replace(/\s+/g, ' ')}` : pat.name;
                 const handle = comment ? `<span class="arr-clip-resize" title="Drag to resize the comment pattern" aria-hidden="true"><i class="material-icon">swap_horiz</i></span>` : '';
-                const hint = comment ? `${pat.name} · ${text || 'Notes'}` : `${pat.name} · ${pat.notes.length} notes`;
+                const summary = comment ? [] : automationSummary([pat]);
+                const badges = summary.map(spec => `<span style="color:${spec.color}"${spec.active ? '' : ' class="is-bypassed"'}>${spec.name}${spec.active ? '' : ' off'}</span>`).join(' · ');
+                const curves = summary.length ? `<svg class="arr-automation-curves" viewBox="0 0 1000 22" preserveAspectRatio="none" aria-hidden="true">${automationPreview(pat)}</svg>` : '';
+                const automationHint = summary.length ? ' · Automation: ' + summary.map(s => s.name + (s.active ? '' : ' (bypassed)')).join(', ') : '';
+                const hint = comment ? `${pat.name} · ${text || 'Notes'}` : `${pat.name} · ${pat.notes.length} notes${automationHint}`;
                 html += `<div class="arr-clip${selected}${comment ? ' arr-comment-clip' : ''}" data-placement="${escapeHtml(pl.id)}"
                               data-channel="${i}"
                               style="left:${left}px;width:${w}px;background:${color}"
-                              title="${escapeHtml(hint)}">${comment ? '' : patternPreview(pat)}<span class="arr-clip-label">${escapeHtml(label)}</span>${handle}</div>`;
+                              title="${escapeHtml(hint)}">${comment ? '' : patternPreview(pat)}${curves}${badges ? `<span class="arr-automation-badges">${badges}</span>` : ''}<span class="arr-clip-label">${escapeHtml(label)}</span>${handle}</div>`;
             }
             html += `  </div>`;
             html += `</div>`;

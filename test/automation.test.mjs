@@ -21,3 +21,13 @@ test('automation is bounded, resets after a clip and survives project round trip
   const a=new Uint8Array(bytes);assert.ok(a.some((v,i)=>v===0xb0&&a[i+1]===11&&a[i+2]===0));
  }
 });
+
+test('automation summary distinguishes active, bypassed and empty curves', async()=>{
+ const {automationSummary,automationPreview}=await import('../js/editor/automation.js');
+ const patterns=[{automation:{pan:{points:[{x:0,y:0},{x:1,y:1}]} }},{automation:{pan:{bypass:true,points:[{x:0,y:.5}]},fade:{points:[]}}}];
+ const summary=automationSummary(patterns);
+ assert.equal(summary.length,1);assert.equal(summary[0].count,2);assert.equal(summary[0].active,1);
+ assert.ok(automationPreview(patterns[0]).includes('#65caff'));
+ assert.ok(automationPreview(patterns[1]).includes('stroke-dasharray'));
+ assert.equal(automationPreview({}),'');
+});

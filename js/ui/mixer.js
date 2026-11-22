@@ -1,4 +1,4 @@
-export function openMixer({ title = 'Mixer', channels, onChange, onCommit, showPan = false } = {}) {
+export function openMixer({ title = 'Mixer', channels, onChange, onCommit, showPan = false, getAutomation = null } = {}) {
     const dialog = document.createElement('dialog');
     dialog.className = 'arr-dialog-box mixer-dialog app-dialog';
     dialog.setAttribute('aria-label', title);
@@ -69,6 +69,20 @@ export function openMixer({ title = 'Mixer', channels, onChange, onCommit, showP
             pan.addEventListener('input', () => { channel.pan = Number(pan.value); updatePan(); onChange(channel); });
             pan.addEventListener('change', () => onCommit?.());
             pan.addEventListener('dblclick', () => { pan.value = 64; channel.pan = 64; updatePan(); onChange(channel); onCommit?.(); });
+        }
+        if (getAutomation) {
+            const summary = getAutomation(channel);
+            const details = document.createElement('div');
+            details.className = 'mixer-automation';
+            details.textContent = summary.length ? 'Pattern automation: ' : 'Pattern automation: none';
+            for (const spec of summary) {
+                const badge = document.createElement('span');
+                badge.style.color = spec.color;
+                badge.textContent = `${spec.name} ${spec.active}/${spec.count} active`;
+                badge.title = 'Active patterns / patterns with a curve, including unplaced patterns. Not a channel audio effect.';
+                details.append(badge);
+            }
+            row.append(details);
         }
         refreshRows.push(refresh);
         refresh(); list.append(row);
