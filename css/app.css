@@ -1206,3 +1206,8 @@ input, textarea, [contenteditable="true"], .log-box { user-select: text; }
 .mixer-sends { grid-column:1 / -1; display:grid; gap:6px; }
 .mixer-sends label { display:grid; grid-template-columns:55px 1fr 3ch; gap:8px; align-items:center; font-size:11px; }
 .mixer-sends input { width:100%; }
+
+/* Chiptune: precise value at left, quick adjustment at right. */
+.chip-value-controls { display:flex; align-items:center; gap:10px; flex:1; min-width:0; }
+.chip-value-controls input[type="number"] { width:76px; min-width:0; flex:0 1 76px; }
+.chip-value-controls input[type="range"] { width:130px; min-width:60px; flex:1; padding:0; cursor:pointer; }
