@@ -1,3 +1,4 @@
+import { chooseChannelSplit } from './splitChannelDialog.js';
 import { prepareChipBank } from '../core/synth.js';
 import { automationPreview, automationSummary } from '../editor/automation.js';
 // js/ui/arrangerView.js
@@ -596,6 +597,7 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
             <div class="arr-menu-sep"></div>
             <button type="button" class="arr-menu-item" data-act="edit">Edit channel…</button>
             <button type="button" class="arr-menu-item" data-act="clone">Clone channel</button>
+            <button type="button" class="arr-menu-item" data-act="split">Split channel…</button>
             <button type="button" class="arr-menu-item" data-act="merge">Merge channels ↓…</button>
             <button type="button" class="arr-menu-item" data-act="up">Move up</button>
             <button type="button" class="arr-menu-item" data-act="down">Move down</button>
@@ -606,6 +608,7 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
         const order = s.orderedChannels();
         const below = order[order.indexOf(info) + 1];
         dialog.querySelector('[data-act="merge"]').disabled = !below || info.kind === 'comment' || below.kind === 'comment';
+        dialog.querySelector('[data-act="split"]').disabled = info.kind === 'comment';
         const focus = dialog.querySelector('[data-act="pattern"]');
         const active = getChannelPattern?.(ch);
         focus.textContent = `Draw pattern: ${active?.name ?? 'New pattern'} ▾`;
@@ -642,6 +645,14 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
                         focusPattern(copy.channel, s.getChannelPattern(copy.channel)?.id);
                         edit(info.kind !== 'comment');
                     } else setStatus('No free MIDI channel for a copy.');
+                } else if (act === 'split') {
+                    const mode = await chooseChannelSplit(s, info);
+                    if (!mode || getSeq() !== s || !s.channels.includes(info)) return;
+                    try {
+                        stop();
+                        const channels = s.splitChannel(ch, mode);
+                        if (channels.length) { focusPattern(ch, active?.id ?? s.getChannelPattern(ch)?.id); edit(); setStatus(`Split into ${channels.length} channels`); }
+                    } catch (error) { setStatus(error.message); }
                 } else if (act === 'merge') {
                     const message = `Move all patterns and notes from ${below.name || 'the channel below'} into ${name}, then delete the lower channel? ${name}'s instrument, volume and effects sends will be used. Clip positions and pattern automation are retained; overlapping automation will share one channel. Undo can restore both channels.`;
                     if (!await confirmAction('Merge channels', message) || getSeq() !== s || s.orderedChannels()[s.orderedChannels().indexOf(info)+1] !== below) return;

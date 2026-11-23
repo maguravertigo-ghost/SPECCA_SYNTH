@@ -1,3 +1,4 @@
+import { splitGroups } from './channelSplit.js';
 // js/editor/sequence.js
 
 const DEFAULT_TPQ = 480;
@@ -190,6 +191,44 @@ export class Sequence {
             if (copies.has(clip.patternId)) this.placePattern(copies.get(clip.patternId), clip.startTick);
         }
         return clone;
+    }
+
+    splitChannel(channel, mode = 'families') {
+        const source=this.channels.find(c=>c.channel===channel&&c.created!==false);
+        if(!source||source.kind==='comment')return [];
+        const patterns=this.patterns.filter(p=>p.channel===channel);
+        const groups=splitGroups(patterns,{mode,isDrum:source.isDrum});
+        if(groups.length<2)return [];
+        const order=this.orderedChannels().map(c=>c.channel), used=new Set(order);
+        const free=Array.from({length:128*16},(_,i)=>i).filter(i=>!used.has(i));
+        if(free.length<groups.length-1)throw new Error('Not enough free MIDI channels to split this part.');
+        // Plan the complete split before changing the project. Repeats reuse each
+        // new subpattern, so later note edits still update every repeated clip.
+        const base=structuredClone(source), placements=[...this.arrangement];
+        const originalNotes=new Map(patterns.map(p=>[p.id,structuredClone(p.notes)]));
+        const result=[];
+        for(const [index,group] of groups.entries()) {
+            const lane=index===0?channel:free[index-1];
+            const info={...structuredClone(base),channel:lane,name:`${base.name||'Channel'} · ${group.name}`,created:true};
+            result.push(info);
+            const keys=new Set(group.keys);
+            for(const original of patterns) {
+                const notes=originalNotes.get(original.id).filter(n=>keys.has(n.key));
+                if(index===0) { original.notes=notes.map(n=>({...n,track:lane}));continue; }
+                if(!notes.length)continue;
+                const copy={...structuredClone(original),id:makeId('pat'),channel:lane,
+                    name:`${original.name} · ${group.name}`,
+                    notes:notes.map(n=>({...n,id:makeId('n'),track:lane}))};
+                this.patterns.push(copy);
+                for(const placement of placements.filter(p=>p.patternId===original.id))this.arrangement.push({...placement,id:makeId('pl'),patternId:copy.id});
+            }
+        }
+        const lanes=new Set(result.map(c=>c.channel));
+        this.channels=this.channels.filter(c=>!lanes.has(c.channel));
+        this.channels.push(...result);
+        order.splice(order.indexOf(channel),1,...result.map(c=>c.channel));this.channelOrder=order;
+        for(const info of result)delete this.patternCounters[info.channel];
+        return result;
     }
 
     mergeNextChannel(channel) {

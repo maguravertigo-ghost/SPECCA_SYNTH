@@ -1227,3 +1227,6 @@ input, textarea, [contenteditable="true"], .log-box { user-select: text; }
 .manual-keyboard > small { display:block; font-size:10px; color:var(--text-mut); margin-top:7px; }
 #prKeyboard.active { color:#87caff; background:#243d56; }
 #prKeyboardHost { flex:none; }
+
+.channel-split-dialog { max-height:90vh; overflow:auto; }
+.channel-split-dialog [data-preview] { max-height:180px; overflow:auto; }
