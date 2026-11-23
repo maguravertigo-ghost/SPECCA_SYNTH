@@ -6,6 +6,7 @@ import { createSoundFontSource } from './soundFontSource.js';
 
 let ctx = null;
 let masterGain = null;
+let installedFont = null;
 let volume = 1;
 let analyser = null;
 let sampleFrame = null;
@@ -249,7 +250,7 @@ export async function initSynth() {
             ]);
             validateSoundFont(sfBuffer);
             const remember = onFontInstalled;
-            const copy = remember ? new Blob([sfBuffer]) : null;
+            const copy = new Blob([sfBuffer]);
             installingFont = true;
             try {
                 await audioStep('Installing SoundFont', 20000, () => candidate.soundBankManager.addSoundBank(sfBuffer, 'main-sf2', 0), workletFailure);
@@ -260,6 +261,7 @@ export async function initSynth() {
             seq = new Sequencer(candidate, { skipToFirstNoteOn: false });
             previewSeq = new Sequencer(candidate, { skipToFirstNoteOn: false });
             synth = candidate;
+            installedFont = copy;
             reportAudio('ready', `Audio ready · ${context.sampleRate / 1000} kHz`);
             onFontInstalled = null;
             if (remember) await remember(copy);
@@ -301,9 +303,10 @@ export async function changeSoundFont(file, onInstalled = null) {
         await lastLoad.catch(() => {});
         const bytes = await source.read({ signal: new AbortController().signal, onStatus: (label, progress) => reportAudio('loading', label, progress) });
         validateSoundFont(bytes);
-        const copy = onInstalled ? new Blob([bytes]) : null;
+        const copy = new Blob([bytes]);
         seq.pause(); previewSeq.pause(); synth.stopAll(true);
         await audioStep('Installing SoundFont', 20000, () => synth.soundBankManager.addSoundBank(bytes, 'main-sf2', 0));
+        installedFont = copy;
         if (onInstalled) await onInstalled(copy);
     } finally {
         replacingFont = false;
@@ -370,4 +373,13 @@ export function stop() {
     if (!seq) return;
     seq.pause();
     try { seq.currentTime = 0; } catch {}
+}
+
+export async function exportSoundBanks(sequence) {
+    await initSynth();
+    if (!installedFont) throw new Error('No SoundFont loaded');
+    const banks = [{bankOffset:0, soundBankBuffer:await installedFont.arrayBuffer()}];
+    const chip = buildChipBank(sequence.channels);
+    if (chip) banks.push({bankOffset:0,soundBankBuffer:chip});
+    return banks;
 }

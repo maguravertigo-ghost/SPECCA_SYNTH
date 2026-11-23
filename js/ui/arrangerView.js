@@ -596,12 +596,16 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
             <div class="arr-menu-sep"></div>
             <button type="button" class="arr-menu-item" data-act="edit">Edit channel…</button>
             <button type="button" class="arr-menu-item" data-act="clone">Clone channel</button>
+            <button type="button" class="arr-menu-item" data-act="merge">Merge channels ↓…</button>
             <button type="button" class="arr-menu-item" data-act="up">Move up</button>
             <button type="button" class="arr-menu-item" data-act="down">Move down</button>
             <div class="arr-menu-sep"></div>
             <button type="button" class="arr-menu-item danger" data-act="delete">Delete channel</button>
             <button type="button" class="arr-menu-item" data-act="cancel">Cancel</button>`;
         dialog.querySelector('h2').textContent = name;
+        const order = s.orderedChannels();
+        const below = order[order.indexOf(info) + 1];
+        dialog.querySelector('[data-act="merge"]').disabled = !below || info.kind === 'comment' || below.kind === 'comment';
         const focus = dialog.querySelector('[data-act="pattern"]');
         const active = getChannelPattern?.(ch);
         focus.textContent = `Draw pattern: ${active?.name ?? 'New pattern'} ▾`;
@@ -638,6 +642,11 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
                         focusPattern(copy.channel, s.getChannelPattern(copy.channel)?.id);
                         edit(info.kind !== 'comment');
                     } else setStatus('No free MIDI channel for a copy.');
+                } else if (act === 'merge') {
+                    const message = `Move all patterns and notes from ${below.name || 'the channel below'} into ${name}, then delete the lower channel? ${name}'s instrument, volume and effects sends will be used. Clip positions and pattern automation are retained; overlapping automation will share one channel. Undo can restore both channels.`;
+                    if (!await confirmAction('Merge channels', message) || getSeq() !== s || s.orderedChannels()[s.orderedChannels().indexOf(info)+1] !== below) return;
+                    stop();
+                    if (s.mergeNextChannel(ch)) { focusPattern(ch, active?.id ?? s.getChannelPattern(ch)?.id); edit(); }
                 } else if (act === 'delete') {
                     if (!await confirmAction('Delete channel', `Delete ${name} and all its patterns and clips?`) || getSeq() !== s) return;
                     s.channels = s.channels.filter(c => c.channel !== ch);

@@ -1,3 +1,5 @@
+import { renderProjectWav } from './editor/renderWav.js';
+import { openWavExport } from './ui/exportWavDialog.js';
 import { openAudioEffects } from './ui/audioEffectsDialog.js';
 import { defaultEffects } from './editor/audioEffects.js';
 import { applyProjectEffects } from './core/synth.js';
@@ -437,6 +439,12 @@ menubar = mountMenubar({
     saveAs: () => exportProjectMidi(false),
     saveTracks: () => exportProjectMidi(true),
     saveChannelFiles: exportChannelFiles,
+    exportWav: () => {
+        pianoRoll?.stop(); arrangerView?.stop(); stopAllPlayback();
+        const sequence=Sequence.fromJSON(currentSequence.toJSON());
+        const filename=`${midiBaseName()}.wav`;
+        openWavExport({render:options=>renderProjectWav(sequence,options),download:buffer=>downloadFile(buffer,'audio/wav',filename)});
+    },
 
     undo: () => restoreEdit('undo'),
     redo: () => restoreEdit('redo'),

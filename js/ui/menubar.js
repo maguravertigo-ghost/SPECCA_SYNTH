@@ -11,6 +11,7 @@ const ACTIONS = {
     'file-save-as':      'saveAs',
     'file-save-tracks':  'saveTracks',
     'file-save-channel-files': 'saveChannelFiles',
+    'file-export-wav': 'exportWav',
 
     'edit-undo':         'undo',
     'edit-redo':         'redo',

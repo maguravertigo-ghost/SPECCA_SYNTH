@@ -192,6 +192,22 @@ export class Sequence {
         return clone;
     }
 
+    mergeNextChannel(channel) {
+        const ordered = this.orderedChannels();
+        const target = ordered.find(c => c.channel === channel);
+        const source = ordered[ordered.indexOf(target) + 1];
+        if (!target || !source || target.kind === 'comment' || source.kind === 'comment') return null;
+        // Retain pattern identities and every placement, including overlapping clips.
+        for (const pattern of this.patterns.filter(p => p.channel === source.channel)) {
+            pattern.channel = target.channel;
+            for (const note of pattern.notes) note.track = target.channel;
+        }
+        this.channels = this.channels.filter(c => c !== source);
+        this.channelOrder = this.channelOrder.filter(c => c !== source.channel);
+        delete this.patternCounters[source.channel];
+        return source;
+    }
+
     swapChannels(first, second) {
         const swap = channel => channel === first ? second : channel === second ? first : channel;
         for (const channel of this.channels) channel.channel = swap(channel.channel);
