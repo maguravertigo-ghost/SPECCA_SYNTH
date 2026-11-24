@@ -1230,3 +1230,22 @@ input, textarea, [contenteditable="true"], .log-box { user-select: text; }
 
 .channel-split-dialog { max-height:90vh; overflow:auto; }
 .channel-split-dialog [data-preview] { max-height:180px; overflow:auto; }
+.chip-synth-dialog { width:min(1000px,95vw); max-height:94vh; overflow:auto; }
+.chip-synth-top,.chip-preview-keys { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+.chip-graphs { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; }
+.chip-graphs figure { margin:12px 0; background:#101925; border:1px solid #394759; border-radius:5px; padding:5px; }
+.chip-graphs figcaption { font-size:11px; color:#b9c8dd; }
+.chip-graphs svg { width:100%; height:110px; touch-action:none; }
+.chip-graphs path { fill:none; stroke-width:2; }
+.chip-axis { stroke:#647286; stroke-dasharray:3 4; }
+.chip-wave-path { stroke:#65caff; }
+.chip-env-path { stroke:#ffb15c; }
+.chip-pitch-path { stroke:#bda0ff; }
+.chip-graphs circle { fill:#ffb15c; cursor:move; }
+.chip-synth-parameters { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px 24px; }
+.chip-synth-parameter { display:grid; grid-template-columns:minmax(90px,1fr) 85px minmax(70px,1fr); align-items:center; gap:8px; font-size:12px; }
+.chip-synth-parameter input { min-width:0; width:100%; box-sizing:border-box; }
+.chip-preview-keys { margin-top:16px; }
+.chip-preview-keys button { background:#dce6f6; color:#172235; padding:10px 16px; border-radius:4px; cursor:pointer; }
+.chip-preview-keys button.active { background:#63b8ea; transform:translateY(2px); }
+@media(max-width:700px) { .chip-graphs { grid-template-columns:1fr; } .chip-synth-parameters { grid-template-columns:1fr; } }

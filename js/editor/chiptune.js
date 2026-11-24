@@ -7,13 +7,14 @@ export const CHIP_PRESETS = {
     hat: { name:'Noise Hat', wave:'noise', duty:.5, attack:.001, decay:.035, sustain:0, release:.015 },
 };
 export function chipSettings(input={}) {
-    const defaults=CHIP_PRESETS.lead;
+    const defaults={...CHIP_PRESETS.lead, transpose:0, fine:0, pitchAmount:0, pitchTime:.12, cutoff:20000, resonance:0};
     const out={...defaults,...input};
     out.wave=['pulse','triangle','noise'].includes(out.wave)?out.wave:'pulse';
-    for(const [key,min,max] of [['attack',.001,4],['decay',.005,4],['sustain',0,1],['release',.005,4],['duty',.125,.75]]) {
+    for(const [key,min,max] of [['attack',.001,4],['decay',.005,4],['sustain',0,1],['release',.005,4],['duty',.05,.95],['transpose',-36,36],['fine',-100,100],['pitchAmount',-48,48],['pitchTime',.005,2],['cutoff',40,20000],['resonance',0,18]]) {
         out[key]=Number.isFinite(out[key])?Math.max(min,Math.min(max,out[key])):defaults[key];
     }
-    out.duty=[.125,.25,.5,.75].reduce((a,b)=>Math.abs(b-out.duty)<Math.abs(a-out.duty)?b:a,.5);
+    out.duty=Math.round(out.duty*1000)/1000;
+    out.transpose=Math.round(out.transpose);
     return out;
 }
 export function chipPatch(channel) {
@@ -39,7 +40,7 @@ export function buildChipBank(channels) {
         let sampleId=sampleMap.get(sampleKey);
         if(sampleId===undefined) {
             sampleId=samples.length;sampleMap.set(sampleKey,sampleId);
-            const start=pcm.length/2, length=settings.wave==='noise'?16384:256;
+            const start=pcm.length/2, length=settings.wave==='noise'?16384:1024;
             let random=0x12345678;
             for(let j=0;j<length;j++) {
                 const phase=j/length;
@@ -47,7 +48,7 @@ export function buildChipBank(channels) {
                 const value=settings.wave==='pulse'?(phase<settings.duty?1-settings.duty:-settings.duty):settings.wave==='triangle'?1-4*Math.abs(phase-.5):(random/4294967296*2-1)*.65;
                 pcm.push(...u16(Math.round(value*24000)));
             }
-            samples.push({start,end:start+length,rate:settings.wave==='noise'?22050:Math.round(261.625565*length)});
+            samples.push({start,end:start+length,rate:settings.wave==='noise'?22050:Math.round(130.8127825*length)});
             pcm.push(...Array(92).fill(0));
         }
         phdr.push(...name(`Chip ${channel.channel+1}`),...u16(patch.program),...u16(patch.bankMSB),...u16(i),...Array(12).fill(0));
@@ -55,8 +56,12 @@ export function buildChipBank(channels) {
         inst.push(...name(`Voice ${i}`),...u16(i));ibag.push(...u16(igen.length/4),0,0);
         igen.push(...gen(34,timecents(settings.attack)),...gen(36,timecents(settings.decay)),
             ...gen(37,settings.sustain<=0?1440:Math.round(-200*Math.log10(settings.sustain))),
-            ...gen(38,timecents(settings.release)),...gen(48,80),...gen(54,1),...gen(58,60));
+            ...gen(38,timecents(settings.release)),...gen(48,80),...gen(54,1),...gen(58,settings.wave==='noise'?60:48));
         if(settings.wave==='noise')igen.push(...gen(56,0));
+        igen.push(...gen(51,settings.transpose),...gen(52,Math.round(settings.fine)),
+            ...gen(8,Math.min(13500,Math.round(1200*Math.log2(settings.cutoff/8.176)))),...gen(9,Math.round(settings.resonance*10)));
+        if(settings.pitchAmount) igen.push(...gen(7,Math.round(settings.pitchAmount*100)),...gen(26,timecents(.001)),
+            ...gen(28,timecents(settings.pitchTime)),...gen(29,1000),...gen(30,timecents(.005)));
         igen.push(...gen(53,sampleId));
     }
     phdr.push(...name('EOP'),0,0,0,0,...u16(voices.length),...Array(12).fill(0));

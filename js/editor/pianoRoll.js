@@ -1,3 +1,4 @@
+import { openChipSynth } from '../ui/chipSynthDialog.js';
 import { mountManualKeyboard } from '../ui/manualKeyboard.js';
 import { startManualVoice, silenceManualVoices, prepareManualVoice } from '../core/manualVoice.js';
 import { recordedSegments } from './liveRecording.js';
@@ -62,6 +63,7 @@ export function mountPianoRoll(rootEl, opts = {}) {
                 <strong id="prChannelName"></strong>
                 <label id="prPatternField" class="pr-num" hidden><span>Pattern</span> <select id="prPatternSelect"></select></label>
                 <button id="prInstrumentBtn" class="pr-t-btn" type="button">Instrument…</button>
+                <button id="prChipSynth" class="pr-t-btn" type="button" hidden>Chiptune…</button>
                 <button id="prNewPattern" class="pr-t-btn" type="button">New pattern</button>
                 <label id="prBarsField" class="pr-num" title="Length of this pattern and all its clips"><span>Bars</span>
                     <input id="prPatternBars" type="number" min="1" max="1024" step="1" aria-label="Pattern length in bars">
@@ -1039,6 +1041,7 @@ export function mountPianoRoll(rootEl, opts = {}) {
         instrumentBtn.textContent = channel ? `Instrument: ${getInstrumentLabel(channel)}` : 'Instrument…';
         instrumentBtn.title = channel ? instrumentFamily(channel) : '';
         const comment = isComment();
+        $('#prChipSynth').hidden = comment || channel?.source !== 'chiptune';
         refreshChannelMute();
         instrumentBtn.hidden = comment;
         instrumentBtn.disabled = !channel;
@@ -1162,6 +1165,14 @@ export function mountPianoRoll(rootEl, opts = {}) {
         resetViewport();
     });
 
+    $('#prChipSynth').addEventListener('click', () => {
+        const sequence=getSeq(),channel=getChannelInfo();if(!channel||channel.source!=='chiptune')return;
+        stop(false);
+        openChipSynth({sequence,channel,onApply: patch=>{
+            if(getSeq()!==sequence||!sequence.channels.includes(channel))return;
+            Object.assign(channel,patch);refreshHeader();onInstrumentChange?.();onEdit?.();
+        }});
+    });
     let pickerEl = null;
     instrumentBtn.addEventListener('click', () => {
         const channel = getChannelInfo();

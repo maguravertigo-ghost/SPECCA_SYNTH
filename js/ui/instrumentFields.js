@@ -20,12 +20,12 @@ export function mountInstrumentFields(root, current = {}, { allowComment = false
     chipPanel.dataset.chipPanel='';
     chipPanel.innerHTML=`<label class="arr-field"><span>Chip preset</span><select data-chip-preset></select></label>
         <label class="arr-field"><span>Wave</span><select data-chip-wave><option value="pulse">Pulse</option><option value="triangle">Triangle</option><option value="noise">Noise</option></select></label>
-        <label class="arr-field"><span>Pulse width</span><select data-chip-duty><option value="0.125">12.5%</option><option value="0.25">25%</option><option value="0.5">50%</option><option value="0.75">75%</option></select></label>
-        ${[['attack','Attack (s)',.001,4,.001],['decay','Decay (s)',.005,4,.005],['sustain','Sustain',0,1,.01],['release','Release (s)',.005,4,.005]].map(([id,label,min,max,step])=>`<div class="arr-field chip-parameter"><span>${label}</span><div class="chip-value-controls"><input type="number" aria-label="${label}" data-chip-${id} min="${min}" max="${max}" step="${step}"><input type="range" aria-label="${label} slider" data-chip-slider="${id}" min="${min}" max="${max}" step="${step}"></div></div>`).join('')}
+        ${[['duty','Pulse width (0–1)',.05,.95,.001],['attack','Attack (s)',.001,4,.001],['decay','Decay (s)',.005,4,.005],['sustain','Sustain',0,1,.01],['release','Release (s)',.005,4,.005]].map(([id,label,min,max,step])=>`<div class="arr-field chip-parameter"><span>${label}</span><div class="chip-value-controls"><input type="number" aria-label="${label}" data-chip-${id} min="${min}" max="${max}" step="${step}"><input type="range" aria-label="${label} slider" data-chip-slider="${id}" min="${min}" max="${max}" step="${step}"></div></div>`).join('')}
         <p class="muted">Procedural looped waves + ADSR. Polyphonic, not a hardware NES emulator. Uses the same mixer, automation and effects sends.</p>`;
     root.append(chipPanel);
     const chipPreset=root.querySelector('[data-chip-preset]');
     chipPreset.replaceChildren(new Option('Custom',''),...Object.entries(CHIP_PRESETS).map(([id,p])=>new Option(p.name,id)));
+    let chipConfig=chipSettings(current.chip);
     let chipName=current.chip?.name || CHIP_PRESETS.lead.name;
     const syncChipSliders=()=>{
         for(const slider of chipPanel.querySelectorAll('[data-chip-slider]')) {
@@ -38,7 +38,7 @@ export function mountInstrumentFields(root, current = {}, { allowComment = false
         slider.addEventListener('input',()=>{number.value=slider.value;});
         number.addEventListener('input',syncChipSliders);
     }
-    const fillChip=settings=>{chipName=settings.name;for(const id of ['wave','duty','attack','decay','sustain','release'])root.querySelector(`[data-chip-${id}]`).value=settings[id];syncChipSliders();};
+    const fillChip=settings=>{chipConfig=chipSettings(settings);chipName=settings.name;for(const id of ['wave','duty','attack','decay','sustain','release'])root.querySelector(`[data-chip-${id}]`).value=settings[id];syncChipSliders();};
     fillChip(chipSettings(current.chip));
     chipPreset.addEventListener('change',()=>{if(CHIP_PRESETS[chipPreset.value])fillChip(CHIP_PRESETS[chipPreset.value]);});
     const category = root.querySelector('[data-category]');
@@ -90,7 +90,7 @@ export function mountInstrumentFields(root, current = {}, { allowComment = false
     const read = () => {
         if (category.value === 'comment') return { kind: 'comment' };
         if (category.value === 'chip') {
-            const chip={name:chipName};
+            const chip={...chipConfig,name:chipName};
             for(const id of ['wave','duty','attack','decay','sustain','release']) { const value=root.querySelector(`[data-chip-${id}]`).value; chip[id]=id==='wave'?value:Number(value); }
             return {source:'chiptune',chip:chipSettings(chip),isDrum:false,program:current.program??80,bankMSB:current.bankMSB??0,bankLSB:current.bankLSB??0,kind:'instrument'};
         }
