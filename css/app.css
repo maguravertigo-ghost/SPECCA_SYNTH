@@ -1249,3 +1249,22 @@ input, textarea, [contenteditable="true"], .log-box { user-select: text; }
 .chip-preview-keys button { background:#dce6f6; color:#172235; padding:10px 16px; border-radius:4px; cursor:pointer; }
 .chip-preview-keys button.active { background:#63b8ea; transform:translateY(2px); }
 @media(max-width:700px) { .chip-graphs { grid-template-columns:1fr; } .chip-synth-parameters { grid-template-columns:1fr; } }
+/* Absolute-time audio and cue markers. Labels occupy collision-tested lanes above LOG. */
+.arr-audio-clip { position:absolute; top:1px; height:29px; overflow:hidden; border:1px solid #73d5eb; border-radius:3px; background:#153942; cursor:pointer; }
+.arr-audio-clip svg { position:absolute; top:-9px; left:0; pointer-events:none; }
+.arr-audio-clip path { stroke:#67d3de; stroke-width:1; fill:none; }
+.arr-audio-clip span { position:relative; padding:1px 5px; color:white; font-size:11px; text-shadow:0 1px 3px #000; background:#112b3c99; }
+.arr-marker-tools { flex-shrink:0; display:flex; gap:6px; align-items:center; flex-wrap:wrap; padding:4px 10px; background:var(--panel); border-top:1px solid var(--border); font-size:11px; }
+.arr-marker-tools .btn { padding:3px 9px; font-size:11px; }
+.arr-marker-strip { position:relative; flex-shrink:0; overflow:hidden auto; background:#17171b; border-top:1px solid #4c4526; }
+.arr-marker-strip::after { content:'CUE'; position:sticky; left:0; top:0; display:block; width:160px; height:100%; background:#17171b; color:#bda956; padding:6px 12px; box-sizing:border-box; pointer-events:none; }
+#arrMarkerLabels { position:absolute; left:0; top:0; }
+.arr-time-marker { position:absolute; height:24px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; background:#302a14; color:#ffe178; border:1px solid #d6b543; border-left:3px solid #ffdc52; border-radius:3px; cursor:pointer; font:12px sans-serif; text-align:left; padding:2px 7px; box-sizing:border-box; }
+.arr-time-marker.selected { background:#67521b; border-color:#fff0a4; }
+.arr-time-marker-lines { position:absolute; inset:40px 0 0; pointer-events:none; z-index:18; overflow:hidden; }
+.arr-time-marker-lines i { position:absolute; top:0; bottom:0; width:1px; background:#f9d344; opacity:.8; }
+.timestamp-fields { display:flex; gap:10px; align-items:center; }
+.timestamp-fields label { display:flex; flex-direction:column; gap:5px; font-size:12px; }
+.timestamp-fields input { width:100px; padding:8px; font:18px var(--mono); color:var(--text); background:var(--bg); border:1px solid var(--border-hl); }
+.timestamp-fields input::-webkit-inner-spin-button { opacity:1; height:32px; }
+.timestamp-dialog [data-formatted] { display:block; margin-top:12px; color:#ffe178; font:16px var(--mono); }

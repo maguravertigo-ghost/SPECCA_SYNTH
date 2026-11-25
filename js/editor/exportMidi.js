@@ -1,3 +1,4 @@
+import {audioEnd} from './timeline.js';
 import { chipPatch } from './chiptune.js';
 import { EFFECTS, effectMessages, effectSend } from './audioEffects.js';
 import { automationEvents } from './automation.js';
@@ -22,7 +23,7 @@ function writeSequence(sequence, clips, { loop = null, respectMute = false, live
     const parts = new Map();
     const trackKey = lane => splitTracks ? lane : Math.floor(lane / 16);
     const active = new Set();
-    const visual = new Set(sequence.channels.filter(c => c.kind === 'comment').map(c => c.channel));
+    const visual = new Set(sequence.channels.filter(c => (c.kind === 'comment' || c.kind === 'audio')).map(c => c.channel));
     let endTick = minimumEndTick;
     const emit = (tick, order, data, part = null) => {
         let events = meta;
@@ -79,6 +80,8 @@ function writeSequence(sequence, clips, { loop = null, respectMute = false, live
         emit(0, -1, [0xb0 | ch, 11, 127], part);
         emit(0, -1, [0xb0 | ch, 10, liveMix ? 64 : (info.pan ?? 64) & 0x7f], part);
     }
+    // SpessaSynth measures duration from voice events / loop markers, not End-of-Track.
+    if (!loop && minimumEndTick > 0) emit(endTick, 3, marker('loopEnd'));
     if (loop) {
         const loopEnd = loop.end ?? endTick;
         endTick = Math.max(endTick, loopEnd);
@@ -153,7 +156,7 @@ export function writePatternMixMIDI(sequence, patternId, { placementId, anchorTi
         ?? matching.reduce((first, p) => !first || p.startTick < first.startTick ? p : first, null);
     const startTick = placement?.startTick ?? Math.max(0, Math.round(anchorTick));
     const endTick = startTick + pattern.lengthTicks;
-    const visual = new Set(sequence.channels.filter(c => c.kind === 'comment').map(c => c.channel));
+    const visual = new Set(sequence.channels.filter(c => (c.kind === 'comment' || c.kind === 'audio')).map(c => c.channel));
     const clips = [];
     const add = (p, start) => {
         if (!p || visual.has(p.channel) || start >= endTick || start + p.lengthTicks <= startTick) return;
@@ -177,7 +180,7 @@ export function writePatternMixMIDI(sequence, patternId, { placementId, anchorTi
     };
     for (const clip of sequence.arrangement) add(patterns.get(clip.patternId), clip.startTick);
     if (!placement) add(pattern, startTick);
-    return { startTick, midi: clips.length ? writeSequence(sequence, clips, {
+    return { startTick, midi: (clips.length || sequence.audioClips?.some(c=>c.startSeconds<sequence.ticksToSeconds(endTick)&&c.startSeconds+c.duration>sequence.ticksToSeconds(startTick))) ? writeSequence(sequence, clips, {
         previewAt: startTick, tempoWindow: true, loop: { end: pattern.lengthTicks }, respectMute: true, ...options,
     }) : null };
 }
@@ -188,7 +191,7 @@ export function writeArrangementMIDI(sequence, options) {
         const pattern = sequence.getPattern(placement.patternId);
         if (pattern) clips.push({ pattern, startTick: placement.startTick });
     }
-    return writeSequence(sequence, clips, options);
+    return writeSequence(sequence, clips, { ...options, minimumEndTick: options?.liveMix ? Math.ceil(sequence.secondsToTicks(audioEnd(sequence))) : 0 });
 }
 
 export function writeChannelMIDIFiles(sequence) {

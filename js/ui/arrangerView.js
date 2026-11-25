@@ -1,3 +1,7 @@
+import {audioEnd, timelineId, formatTimestamp, layoutMarkers, wavePath} from '../editor/timeline.js';
+import {importWav,prepareAudio,createAudioFollower} from '../core/audioTracks.js';
+import {getAudioContext,getAudioOutput} from '../core/synth.js';
+import {editTimestamp} from './timestampDialog.js';
 import { chooseChannelSplit } from './splitChannelDialog.js';
 import { prepareChipBank } from '../core/synth.js';
 import { automationPreview, automationSummary } from '../editor/automation.js';
@@ -68,6 +72,7 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
                     <div class="arr-playhead" id="arrPlayhead"></div>
                 </div>
             </div>
+            <div class="arr-marker-tools"><button class="btn" type="button" id="arrImportWav" title="WAV at playhead · original speed · stored in this browser">Import WAV…</button><input type="file" accept=".wav,audio/wav" id="arrWavFile" hidden><span>Time markers</span><button class="btn" type="button" id="arrAddMarker">+ At playhead</button><button class="btn" type="button" id="arrPrevMarker" aria-label="Previous marker">◀</button><button class="btn" type="button" id="arrNextMarker" aria-label="Next marker">▶</button><button class="btn" type="button" id="arrEditMarker">Edit…</button><button class="btn" type="button" id="arrDeleteMarker">Delete</button></div><div class="arr-marker-strip" id="arrMarkerStrip" aria-label="Time markers"><div id="arrMarkerLabels"></div></div>
             <div class="arr-edit-hint">Channel name: edit notes <span>•</span> Grid: draw <span>•</span> Drag: move <span>•</span> Right click: erase</div>
         </div>
     `;
@@ -106,6 +111,7 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
         cursorTick: 0,
     };
 
+    let audioFollower=null,selectedMarker=null,audioDrag=null,relinkChannel=null;
     let rafId = 0;
     let dirty = true;
     let muteTimer = null;
@@ -141,10 +147,10 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
     let durationTick = 0, audibleEnd = 0;
     const measureArrangement = () => {
         const song = getSeq();
-        if (!song?.arrangement.length) return { end: 0, playable: 0 };
+        if (!song) return { end: 0, playable: 0 };
         const patterns = new Map(song.patterns.map(p => [p.id, p]));
         const comments = new Set(song.channels.filter(c => c.kind === 'comment').map(c => c.channel));
-        let end = 0, playable = 0;
+        let playable = song.secondsToTicks(audioEnd(song)), end = Math.max(playable,...song.timeMarkers.map(m=>song.secondsToTicks(m.seconds)));
         for (const clip of song.arrangement) {
             const pattern = patterns.get(clip.patternId);
             if (!pattern) continue;
@@ -173,6 +179,89 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
     };
     const edit = (audible = true) => { onEdit?.(); if (audible) updatePlayback(); markDirty(); };
     const isCommentChannel = channel => getSeq()?.channels.find(c => c.channel === channel)?.kind === 'comment';
+
+    async function editMarker(marker=null){
+        const song=getSeq();if(!song)return;
+        const result=await editTimestamp({title:marker?'Edit time marker':'Create time marker',name:marker?.name??`Marker ${song.timeMarkers.length+1}`,seconds:marker?.seconds??song.ticksToSeconds(state.cursorTick)});
+        if(!result||song!==getSeq()||(marker&&!song.timeMarkers.includes(marker)))return;
+        if(marker)Object.assign(marker,result);else {marker={id:timelineId('mark'),...result};song.timeMarkers.push(marker);}
+        selectedMarker=marker.id;edit(false);
+    }
+    async function deleteMarker(marker){
+        const song=getSeq();if(!marker||!await confirmAction('Delete time marker',`Delete “${marker.name}”?`)||song!==getSeq())return;
+        song.timeMarkers=song.timeMarkers.filter(m=>m!==marker);selectedMarker=null;edit(false);
+    }
+    function actionMenu(title,actions){
+        const dialog=document.createElement('dialog');dialog.className='app-dialog arr-dialog-box arr-context-menu';dialog.setAttribute('aria-label',title);
+        const heading=document.createElement('h2');heading.className='arr-dialog-title';heading.textContent=title;dialog.append(heading);
+        for(const [label,action] of [...actions,['Close',()=>{}]]){const button=document.createElement('button');button.type='button';button.className='arr-menu-item';button.textContent=label;button.onclick=()=>{dialog.close();action();};dialog.append(button);}
+        dialog.addEventListener('close',()=>dialog.remove(),{once:true});document.body.append(dialog);dialog.showModal();
+    }
+    function renderMarkers(){
+        const song=getSeq(),strip=$('#arrMarkerStrip'),labels=$('#arrMarkerLabels');
+        content.querySelector('.arr-time-marker-lines')?.remove();
+        if(!song)return;
+        const measure=document.createElement('canvas').getContext('2d');measure.font='12px sans-serif';
+        const placed=layoutMarkers(song.timeMarkers,t=>tickToX(song.secondsToTicks(t)),m=>Math.ceil(measure.measureText('⚑ '+m.name+' · '+formatTimestamp(m.seconds)).width)+32);
+        const height=Math.max(36,Math.min(190,(1+Math.max(0,...placed.map(p=>p.lane)))*28+8));
+        strip.style.height=height+'px';labels.style.height=Math.max(height,(1+Math.max(0,...placed.map(p=>p.lane)))*28+8)+'px';
+        labels.style.width=content.style.width;labels.style.transform=`translateX(${-body.scrollLeft}px)`;
+        labels.innerHTML=placed.map(({marker:m,x,width,lane})=>`<button type="button" class="arr-time-marker${selectedMarker===m.id?' selected':''}" data-marker="${escapeHtml(m.id)}" style="left:${x}px;bottom:${lane*28+4}px;width:${width}px" title="${escapeHtml(m.name)} · ${formatTimestamp(m.seconds)}">⚑ ${escapeHtml(m.name)} · ${formatTimestamp(m.seconds)}</button>`).join('');
+        const lines=document.createElement('div');lines.className='arr-time-marker-lines';
+        lines.style.clipPath=`inset(0 0 0 ${CHAN_W+body.scrollLeft}px)`;
+        lines.innerHTML=placed.map(({x})=>`<i style="left:${x}px"></i>`).join('');content.append(lines);
+        for(const button of labels.querySelectorAll('[data-marker]')){
+            const marker=song.timeMarkers.find(m=>m.id===button.dataset.marker);
+            button.onclick=()=>{selectedMarker=marker.id;seekTick(song.secondsToTicks(marker.seconds),true);renderMarkers();};
+            button.ondblclick=()=>editMarker(marker);
+            button.oncontextmenu=e=>{e.preventDefault();e.stopPropagation();selectedMarker=marker.id;renderMarkers();actionMenu(marker.name,[['Go to marker',()=>seekTick(song.secondsToTicks(marker.seconds),true)],['Edit name / time…',()=>editMarker(marker)],['Create at playhead…',()=>editMarker()],['Delete marker',()=>deleteMarker(marker)]]);};
+        }
+        $('#arrEditMarker').disabled=$('#arrDeleteMarker').disabled=!song.timeMarkers.some(m=>m.id===selectedMarker);
+    }
+    body.addEventListener('scroll',renderMarkers,{passive:true});
+    $('#arrMarkerStrip').oncontextmenu=e=>{e.preventDefault();actionMenu('Time markers',[['Create at playhead…',()=>editMarker()]]);};
+    $('#arrAddMarker').onclick=()=>editMarker();
+    $('#arrEditMarker').onclick=()=>editMarker(getSeq().timeMarkers.find(m=>m.id===selectedMarker));
+    $('#arrDeleteMarker').onclick=()=>deleteMarker(getSeq().timeMarkers.find(m=>m.id===selectedMarker));
+    for(const [id,direction] of [['arrPrevMarker',-1],['arrNextMarker',1]])$('#'+id).onclick=()=>{
+        const song=getSeq(),position=song.ticksToSeconds(state.cursorTick),markers=[...song.timeMarkers].sort((a,b)=>a.seconds-b.seconds);
+        const marker=direction>0?markers.find(m=>m.seconds>position+.0005):markers.filter(m=>m.seconds<position-.0005).at(-1);
+        if(marker){selectedMarker=marker.id;seekTick(song.secondsToTicks(marker.seconds),true);renderMarkers();}
+    };
+    async function editAudioChannel(channel){
+        const song=getSeq(),info=song.channels.find(c=>c.channel===channel),clip=song.audioClips.find(c=>c.channel===channel);if(!info||!clip)return;
+        const result=await editTimestamp({title:'Audio channel · start time',name:info.name,seconds:clip.startSeconds});
+        if(!result||song!==getSeq()||!song.channels.includes(info))return;
+        haltPlayback();info.name=result.name;clip.startSeconds=result.seconds;edit();
+    }
+    function openAudioMenu(info){
+        const song=getSeq();
+        actionMenu(info.name,[['Edit name / start time…',()=>editAudioChannel(info.channel)],['Replace / relink WAV…',()=>{relinkChannel=info;$('#arrWavFile').click();}],['Mixer…',()=>onMixer?.()],['Clone audio channel',()=>{haltPlayback();song.cloneChannel(info.channel);edit();}],['Move up',()=>{song.moveChannel(info.channel,-1);edit(false);}],['Move down',()=>{song.moveChannel(info.channel,1);edit(false);}],['Delete audio channel',async()=>{
+            if(!await confirmAction('Delete audio channel',`Delete ${info.name} and its audio clip?`)||song!==getSeq())return;
+            haltPlayback();song.channels=song.channels.filter(c=>c!==info);song.channelOrder=song.channelOrder.filter(id=>id!==info.channel);song.audioClips=song.audioClips.filter(c=>c.channel!==info.channel);edit();
+        }]]);
+    }
+    $('#arrImportWav').onclick=()=>{relinkChannel=null;$('#arrWavFile').click();};
+    $('#arrWavFile').onchange=async e=>{
+        const file=e.target.files[0];e.target.value='';if(!file)return;
+        const song=getSeq(),position=song.ticksToSeconds(state.cursorTick),replacement=relinkChannel;relinkChannel=null;haltPlayback();
+        $('#arrImportWav').disabled=true;
+        try{
+            setStatus('Decoding WAV and drawing waveform…');
+            await initSynth();const asset=await importWav(file,getAudioContext());if(song!==getSeq())return;
+            if(replacement){
+                if(!song.channels.includes(replacement))return;
+                song.audioAssets.push(asset);
+                for(const clip of song.audioClips.filter(c=>c.channel===replacement.channel)){clip.assetId=asset.id;clip.offsetSeconds=0;clip.duration=asset.duration;}
+                edit();setStatus('Audio file replaced; start position preserved.');return;
+            }
+            const used=new Set(song.channels.map(c=>c.channel)),lane=Array.from({length:2048},(_,i)=>i).find(i=>!used.has(i));if(lane===undefined)throw new Error('No free channel for audio.');
+            song.channelOrder=[...song.orderedChannels().map(c=>c.channel),lane];
+            song.audioAssets.push(asset);song.channels.push({channel:lane,kind:'audio',source:'audio',name:file.name,volume:100,pan:64,muted:false,created:true});
+            song.audioClips.push({id:timelineId('audio'),assetId:asset.id,channel:lane,startSeconds:position,offsetSeconds:0,duration:asset.duration});
+            edit();setStatus('WAV imported at playhead · audio stored in this browser; Save preserves its reference.');
+        }catch(error){setStatus(error.message);log(`WAV import: ${error}`,'error');}finally{$('#arrImportWav').disabled=false;}
+    };
 
     // ==================================================================
     // Render
@@ -215,7 +304,7 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
         const header = rows.querySelector(`.arr-chan[data-channel="${channel}"]`);
         if (header) header.title = channelTooltip(channel);
     };
-    const channelTooltip = channel => `Ch ${channel + 1} · Draw: ${getChannelPattern?.(channel)?.name ?? 'New pattern'} · Right-click for options`;
+    const channelTooltip = channel => getSeq()?.channels.find(c=>c.channel===channel)?.kind==='audio' ? 'WAV audio · click to edit start time, name and mix · right-click for options' : `Ch ${channel + 1} · Draw: ${getChannelPattern?.(channel)?.name ?? 'New pattern'} · Right-click for options`;
 
     const renderRows = () => {
         const s = getSeq();
@@ -259,7 +348,7 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
                                    border-color:${muted ? '#666' : '#1a7f37'};"></span>`;
             html += `    <div class="arr-chan-info">`;
             html += `      <div class="arr-chan-name">${escapeHtml(ch.name || ('Ch ' + (i + 1)))}</div>`;
-            html += `      <div class="arr-chan-pat">${escapeHtml(comment ? 'Comment' : instrumentLabel(ch, catalog))}</div>`;
+            html += `      <div class="arr-chan-pat">${escapeHtml(comment ? 'Comment' : ch.kind==='audio' ? 'WAV audio · original speed' : instrumentLabel(ch, catalog))}</div>`;
             html += `    </div>`;
             html += `    <span class="arr-chan-bar" style="background:${color}"></span>`;
             html += `  </div>`;
@@ -282,6 +371,12 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
                               style="left:${left}px;width:${w}px;background:${color}"
                               title="${escapeHtml(hint)}">${comment ? '' : patternPreview(pat)}${curves}${badges ? `<span class="arr-automation-badges">${badges}</span>` : ''}<span class="arr-clip-label">${escapeHtml(label)}</span>${handle}</div>`;
             }
+            if(ch.kind==='audio')for(const clip of s.audioClips.filter(c=>c.channel===i)){
+                const asset=s.audioAssets.find(a=>a.id===clip.assetId);if(!asset)continue;
+                const first=tickToX(s.secondsToTicks(clip.startSeconds))-CHAN_W,last=tickToX(s.secondsToTicks(clip.startSeconds+clip.duration))-CHAN_W;
+                const path=wavePath(asset.peaks??[],clip.startSeconds,clip.startSeconds+clip.duration,t=>tickToX(s.secondsToTicks(t))-CHAN_W-first);
+                html+=`<div class="arr-audio-clip" data-audio-clip="${escapeHtml(clip.id)}" style="left:${first}px;width:${Math.max(2,last-first)}px" title="${escapeHtml(asset.name)} · ${formatTimestamp(clip.startSeconds)}"><svg width="100%" height="48" aria-label="WAV waveform"><path d="${path}"/></svg><span>${escapeHtml(asset.name)}</span></div>`;
+            }
             html += `  </div>`;
             html += `</div>`;
         }
@@ -302,6 +397,7 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
         } else if (lastFramePlaying && seq?.isFinished && !loading) {
             state.cursorTick = end;
         }
+        audioFollower?.update(seq?.currentTime??0,playing&&!loading,hasLoop()?song.ticksToSeconds(effectiveLoopEnd()):Infinity);
         lastFramePlaying = playing;
         const x = tickToX(state.cursorTick);
         let scrollLeft = body.scrollLeft;
@@ -325,13 +421,14 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
     };
 
     const render = () => {
-        if (!dirty || state.dragClip) return;
+        if (!dirty || state.dragClip || audioDrag) return;
         ({ end: durationTick, playable: audibleEnd } = measureArrangement());
         dirty = false;
         viewportWidth = body.clientWidth;
         layoutBarWidth = Math.max(MIN_BAR_W, (viewportWidth - CHAN_W) / totalBars());
         renderRuler();
         renderRows();
+        renderMarkers();
     };
 
     // ==================================================================
@@ -341,7 +438,7 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
         // The header opens the channel; a timeline double-click opens an exact clip.
         rows.querySelectorAll('.arr-row[data-channel] .arr-chan').forEach(header => {
             const row = header.closest('.arr-row');
-            const activate = () => onOpenChannel?.(Number(row.dataset.channel));
+            const activate = () => {const ch=Number(row.dataset.channel);if(getSeq().channels.find(c=>c.channel===ch)?.kind==='audio')editAudioChannel(ch);else onOpenChannel?.(ch);};
             header.addEventListener('click', activate);
             header.addEventListener('keydown', (e) => {
                 if (e.key !== 'Enter' && e.key !== ' ') return;
@@ -428,6 +525,7 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
         else setStatus('No free MIDI port/channel');
     });
     rows.addEventListener('dblclick', (e) => {
+        const audio=e.target.closest('[data-audio-clip]');if(audio){editAudioChannel(Number(audio.closest('[data-channel]').dataset.channel));return;}
         const clip = e.target.closest('.arr-clip');
         if (!clip || e.target.closest('.arr-clip-resize')) return;
         const placement = getSeq()?.arrangement.find(p => p.id === clip.dataset.placement);
@@ -439,6 +537,12 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
         const grid = e.target.closest('.arr-clips[data-channel]');
         const s = getSeq();
         if (!grid || !s) return;
+        if(s.channels.find(c=>c.channel===Number(grid.dataset.channel))?.kind==='audio'){
+            const el=e.target.closest('[data-audio-clip]');if(!el)return;
+            if(e.button===2){e.preventDefault();openAudioMenu(s.channels.find(c=>c.channel===Number(grid.dataset.channel)));return;}
+            const clip=s.audioClips.find(c=>c.id===el.dataset.audioClip);if(!clip)return;
+            e.preventDefault();audioDrag={song:s,clip,el,pointerId:e.pointerId,x:e.clientX,scroll:body.scrollLeft,start:clip.startSeconds,bw:barW(),moved:false};return;
+        }
         e.preventDefault();
         const clip = e.target.closest('.arr-clip');
         const channel = Number(grid.dataset.channel);
@@ -585,6 +689,7 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
         const s = getSeq();
         const info = s.channels.find(c => c.channel === ch);
         if (!info) return;
+        if(info.kind==='audio'){openAudioMenu(info);return;}
 
         const dialog = document.createElement('dialog');
         dialog.className = 'arr-dialog-box arr-context-menu app-dialog';
@@ -607,7 +712,7 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
         dialog.querySelector('h2').textContent = name;
         const order = s.orderedChannels();
         const below = order[order.indexOf(info) + 1];
-        dialog.querySelector('[data-act="merge"]').disabled = !below || info.kind === 'comment' || below.kind === 'comment';
+        dialog.querySelector('[data-act="merge"]').disabled = !below || info.kind === 'comment' || below.kind === 'comment' || below.kind === 'audio';
         dialog.querySelector('[data-act="split"]').disabled = info.kind === 'comment';
         const focus = dialog.querySelector('[data-act="pattern"]');
         const active = getChannelPattern?.(ch);
@@ -674,6 +779,12 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
     };
 
     const onWindowPointerMove = (e) => {
+        if(audioDrag?.pointerId===e.pointerId){
+            const d=audioDrag,dx=e.clientX-d.x+body.scrollLeft-d.scroll;
+            if(Math.abs(dx)>3)d.moved=true;
+            if(d.moved){const tick=d.song.secondsToTicks(d.start)+dx/d.bw*tpb();d.next=Math.round(Math.max(0,d.song.ticksToSeconds(tick))*1000)/1000;d.el.style.left=`${tickToX(d.song.secondsToTicks(d.next))-CHAN_W}px`;}
+            return;
+        }
         if (state.paint?.pointerId === e.pointerId) paintGrid(e);
         const d = state.dragClip;
         if (d?.pointerId === e.pointerId && state.dragMode === 'resize-clip') {
@@ -712,6 +823,7 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
     };
 
     const onWindowPointerUp = (e) => {
+        if(audioDrag?.pointerId===e.pointerId){const d=audioDrag;audioDrag=null;if(d.moved&&e.type!=='pointercancel'&&d.song===getSeq()){haltPlayback();d.clip.startSeconds=d.next;edit();}else markDirty();return;}
         if (state.dragMode === 'seek') {
             if (e.pointerId !== state.seekPointer) return;
             state.dragMode = null;
@@ -759,9 +871,10 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
         const song = getSeq();
         if (!song) return;
         const seq = loadedSequence === song ? getSequencer?.() : null;
-        state.cursorTick = Math.max(0, Math.min(arrangementDurationTick() || (totalBars() * tpb()), Math.round(tick)));
+        state.cursorTick = Math.max(0, Math.min(arrangementDurationTick() || (totalBars() * tpb()), tick));
         if (commit && !loading && seq && !seq.paused && !seq.isFinished) {
             seekingUntil = performance.now() + 100;
+            audioFollower?.stop();
             seq.currentTime = Math.min(seq.duration, song.ticksToSeconds(state.cursorTick));
         }
         if (reveal) {
@@ -836,6 +949,7 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
         try {
             await initSynth();
             await prepareChipBank(s);
+            const audioBuffers=await prepareAudio(s,getAudioContext());
             if (!current()) return;
             const seq = getSequencer();
             const resume = !playbackDirty && reload !== true && loadedSequence === s && pausedByUser && !seq.isFinished;
@@ -858,7 +972,10 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
             if (position > 0 || resume) seq.currentTime = position;
             seekingUntil = performance.now() + 100;
             applyChannelMix(s);
+            audioFollower?.stop();
+            audioFollower=createAudioFollower(getAudioContext(),getAudioOutput(),s,audioBuffers);
             seq.play();
+            audioFollower.update(position,true,loop?s.ticksToSeconds(loop.end):Infinity);
         } catch (err) {
             if (current()) { setStatus(err.message); log(`Arranger play: ${err}`, 'error'); }
         } finally {
@@ -872,6 +989,7 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
 
     const pause = () => {
         renderPlayhead(false);
+        audioFollower?.stop();
         clearTimeout(reloadTimer); reloadPending = false;
         if (loading) { playbackRequest++; loading = false; playbackDirty = true; }
         pausedByUser = true;
@@ -880,6 +998,7 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
     };
 
     const haltPlayback = () => {
+        audioFollower?.stop();
         playbackRequest++;
         clearTimeout(reloadTimer); reloadPending = false;
         loading = pausedByUser = lastFramePlaying = false;
@@ -995,7 +1114,9 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
         refresh: () => { markDirty(); },
         refreshAudio: updatePlayback,
         play, pause, stop,
+        importWav: () => {relinkChannel=null;$('#arrWavFile').click();},
         reset() {
+            audioFollower?.stop();audioFollower=null;selectedMarker=null;
             loadedSequence = null;
             state.loopStartTick = state.cursorTick = 0;
             state.loopEndTick = null;
@@ -1011,6 +1132,7 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
             state.visible = v;
         },
         destroy() {
+            audioFollower?.stop();
             cancelAnimationFrame(rafId);
             ro.disconnect();
             window.removeEventListener('pointermove', onWindowPointerMove);

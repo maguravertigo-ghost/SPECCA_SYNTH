@@ -37,6 +37,7 @@ export function getOutputLevel() {
 }
 
 export const getMasterVolume = () => volume;
+export const getAudioOutput = () => masterGain;
 
 const mixedChannels = new Set();
 

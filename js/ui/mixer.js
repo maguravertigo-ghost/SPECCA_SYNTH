@@ -74,7 +74,7 @@ export function openMixer({ title = 'Mixer', channels, onChange, onCommit, showP
             pan.addEventListener('change', () => onCommit?.());
             pan.addEventListener('dblclick', () => { pan.value = 64; channel.pan = 64; updatePan(); onChange(channel); onCommit?.(); });
         }
-        if (onSendChange) {
+        if (onSendChange && channel.kind !== 'audio') {
             const sends=document.createElement('div');sends.className='mixer-sends';
             for(const [id,spec] of Object.entries(EFFECTS)) {
                 const row=document.createElement('label');row.textContent=spec.name;

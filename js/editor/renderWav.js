@@ -1,3 +1,5 @@
+import {prepareAudio,scheduleAudio} from '../core/audioTracks.js';
+import {audioEnd} from './timeline.js';
 import { WorkletSynthesizer, BasicMIDI } from '../../main.min.js';
 import { exportSoundBanks,getSynth,getMasterVolume } from '../core/synth.js';
 import { writeArrangementMIDI } from './exportMidi.js';
@@ -9,8 +11,8 @@ export async function renderProjectWav(sequence,{sampleRate=44100,tail=8,signal,
     const banks=await exportSoundBanks(sequence);check();
     const midi=BasicMIDI.fromArrayBuffer(writeArrangementMIDI(sequence,{liveMix:true}),'WAV render');
     const end=sequence.arrangement.reduce((t,clip)=>Math.max(t,clip.startTick+Math.max(sequence.getPattern(clip.patternId)?.lengthTicks??0,...(sequence.getPattern(clip.patternId)?.notes??[]).map(n=>n.tick+n.dur))),0);
-    if(!end)throw new Error('No placed patterns to export. Draw the patterns in the arranger first.');
-    const seconds=sequence.ticksToSeconds(end)+tail;
+    if(!end&&!audioEnd(sequence))throw new Error('No placed patterns to export. Draw the patterns in the arranger first.');
+    const seconds=Math.max(sequence.ticksToSeconds(end),audioEnd(sequence))+tail;
     if(seconds>300)throw new Error('This first WAV exporter supports up to 5 minutes including the effects tail.');
     const snapshot=await getSynth().getSnapshot();check();
     // Use the live mix's linear gains, not a second quadratic MIDI volume scaling.
@@ -32,6 +34,7 @@ export async function renderProjectWav(sequence,{sampleRate=44100,tail=8,signal,
         ch.systemParameters.pan=Math.max(-1,Math.min(1,((info.pan??64)-64)/((info.pan??64)>64?63:64)));
     }
     const context=new OfflineAudioContext(2,Math.ceil(seconds*sampleRate),sampleRate);
+    const audioBuffers=await prepareAudio(sequence,context);check();
     let synth;
     try {
         await context.audioWorklet.addModule(new URL('../../spessasynth_processor.min.js',import.meta.url));check();
@@ -40,6 +43,7 @@ export async function renderProjectWav(sequence,{sampleRate=44100,tail=8,signal,
         const gain=context.createGain();gain.gain.value=getMasterVolume();synth.connect(gain);gain.connect(context.destination);
         const configured=synth.startOfflineRender({midiSequence:midi,snapshot,loopCount:0,soundBankList:banks,sequencerOptions:{skipToFirstNoteOn:false}});
         onStatus(`Rendering stereo audio · ${seconds.toFixed(1)} seconds…`);
+        scheduleAudio(context,gain,sequence,audioBuffers,0,{when:0});
         const suspended=context.suspend(0);
         const rendering=context.startRendering();
         await suspended;

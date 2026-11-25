@@ -1,3 +1,5 @@
+import {prepareAudio,createAudioFollower} from '../core/audioTracks.js';
+import {getAudioContext,getAudioOutput} from '../core/synth.js';
 import { openChipSynth } from '../ui/chipSynthDialog.js';
 import { mountManualKeyboard } from '../ui/manualKeyboard.js';
 import { startManualVoice, silenceManualVoices, prepareManualVoice } from '../core/manualVoice.js';
@@ -158,6 +160,7 @@ export function mountPianoRoll(rootEl, opts = {}) {
     };
     let dpr = Math.max(1, window.devicePixelRatio || 1);
     let dirty = true;
+    let audioFollower=null,audioOrigin=0,audioEnd=Infinity;
     let rafId = 0;
     let hotReloadTimer = null;
     let reloadPending = false;
@@ -503,6 +506,7 @@ export function mountPianoRoll(rootEl, opts = {}) {
         if (state.playing && !state.loading && !seq?.paused && state.clock && performance.now() >= seekingUntil) {
             state.cursorTick = Math.max(0, Math.min(loopTicks(), state.clock.toTicks(seq.currentTime)));
         }
+        audioFollower?.update(audioOrigin+(seq?.currentTime??0),state.visible&&state.playing&&!state.loading&&!seq?.paused&&!seq?.isFinished,audioEnd);
         if (state.visible && (dirty || state.playing)) {
             canvas.dataset.playheadTick = String(Math.round(state.cursorTick));
             dirty = false;
@@ -600,6 +604,7 @@ export function mountPianoRoll(rootEl, opts = {}) {
             }
             await initSynth();
             await prepareChipBank(seq);
+            const audioBuffers=mix?await prepareAudio(seq,getAudioContext()):new Map();
             if (request !== playbackRequest) return;
             const sequencer = getSequencer();
             if (!await loadSong(midi, pattern.name, sequencer, () => request === playbackRequest && state.visible && !rootEl.inert)) return;
@@ -609,6 +614,8 @@ export function mountPianoRoll(rootEl, opts = {}) {
             sequencer.loopCount = state.loopEnabled ? Infinity : 0;
             const secondsPerTick = 60 / (seq.tempoAt(startTick) * seq.timeDivision);
             const origin = seq.ticksToSeconds(startTick);
+            audioFollower?.stop();audioOrigin=origin;audioEnd=seq.ticksToSeconds(startTick+pattern.lengthTicks);
+            audioFollower=mix?createAudioFollower(getAudioContext(),getAudioOutput(),seq,audioBuffers):null;
             state.clock = mix ? {
                 toSeconds: tick => seq.ticksToSeconds(startTick + tick) - origin,
                 toTicks: seconds => seq.secondsToTicks(origin + seconds) - startTick,
@@ -619,6 +626,7 @@ export function mountPianoRoll(rootEl, opts = {}) {
                 if (state.cursorTick > 0) sequencer.currentTime = Math.min(sequencer.duration, state.clock.toSeconds(state.cursorTick));
                 seekingUntil = performance.now() + 100;
                 sequencer.play();
+                audioFollower?.update(audioOrigin+sequencer.currentTime,true,audioEnd);
                 state.playing = true;
                 playBtn.classList.add('active');
                 playBtn.firstElementChild.textContent = 'pause';
@@ -636,6 +644,7 @@ export function mountPianoRoll(rootEl, opts = {}) {
     const play = () => pushToSequencer(true);
 
     const stop = (rewind = true) => {
+        audioFollower?.stop();
         manualKeyboard?.flush();
         recordLastLocal = null;
         playbackRequest++;
@@ -670,6 +679,7 @@ export function mountPianoRoll(rootEl, opts = {}) {
         const seq = getSequencer();
         if (seq && state.playing && !state.loading && state.clock) {
             seekingUntil = performance.now() + 100;
+            audioFollower?.stop();
             seq.currentTime = Math.min(seq.duration, state.clock.toSeconds(state.cursorTick));
         }
         if (reveal) {
@@ -1401,6 +1411,7 @@ export function mountPianoRoll(rootEl, opts = {}) {
         play,
         stop,
         destroy() {
+            audioFollower?.stop();
             manualKeyboard?.destroy();
             cancelAnimationFrame(rafId);
             ro.disconnect();

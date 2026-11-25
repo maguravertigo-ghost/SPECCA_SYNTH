@@ -11,6 +11,9 @@ function makeId(prefix) {
 export class Sequence {
     constructor(data = {}) {
         this.version = 1;
+        this.audioAssets = data.audioAssets ?? [];
+        this.audioClips = data.audioClips ?? [];
+        this.timeMarkers = data.timeMarkers ?? [];
         this.name = data.name ?? 'Untitled';
         this.tempo = data.tempo ?? 120;
         this.tempoChanges = data.tempoChanges ?? [];
@@ -62,6 +65,9 @@ export class Sequence {
     toJSON(indent = 2) {
         return JSON.stringify({
             version: this.version,
+            audioAssets: this.audioAssets,
+            audioClips: this.audioClips,
+            timeMarkers: this.timeMarkers,
             name: this.name,
             tempo: this.tempo,
             tempoChanges: this.tempoChanges,
@@ -190,12 +196,15 @@ export class Sequence {
         for (const clip of [...this.arrangement]) {
             if (copies.has(clip.patternId)) this.placePattern(copies.get(clip.patternId), clip.startTick);
         }
+        for (const clip of [...this.audioClips]) {
+            if (clip.channel === channel) this.audioClips.push({...clip,id:makeId('audio'),channel:lane});
+        }
         return clone;
     }
 
     splitChannel(channel, mode = 'families') {
         const source=this.channels.find(c=>c.channel===channel&&c.created!==false);
-        if(!source||source.kind==='comment')return [];
+        if(!source||source.kind==='comment'||source.kind==='audio')return [];
         const patterns=this.patterns.filter(p=>p.channel===channel);
         const groups=splitGroups(patterns,{mode,isDrum:source.isDrum});
         if(groups.length<2)return [];
@@ -235,7 +244,7 @@ export class Sequence {
         const ordered = this.orderedChannels();
         const target = ordered.find(c => c.channel === channel);
         const source = ordered[ordered.indexOf(target) + 1];
-        if (!target || !source || target.kind === 'comment' || source.kind === 'comment') return null;
+        if (!target || !source || target.kind === 'comment' || source.kind === 'comment' || target.kind === 'audio' || source.kind === 'audio') return null;
         // Retain pattern identities and every placement, including overlapping clips.
         for (const pattern of this.patterns.filter(p => p.channel === source.channel)) {
             pattern.channel = target.channel;
@@ -343,6 +352,6 @@ export class Sequence {
             if (!p) continue;
             maxTick = Math.max(maxTick, place.startTick + p.lengthTicks);
         }
-        return this.ticksToSeconds(maxTick);
+        return Math.max(this.ticksToSeconds(maxTick),...this.audioClips.map(c=>c.startSeconds+c.duration));
     }
 }

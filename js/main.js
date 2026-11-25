@@ -430,6 +430,7 @@ menubar = mountMenubar({
     },
     openProject: openProjectDialog,
     open: () => document.getElementById('openMidiInput')?.click(),
+    importWav: () => { showArranger(); arrangerView?.importWav(); },
     importChannels: () => document.getElementById('importMidiChannelsInput').click(),
 
     composeTrack: () => generateProject('compose'),

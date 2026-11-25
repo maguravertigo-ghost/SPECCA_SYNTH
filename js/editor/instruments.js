@@ -43,7 +43,7 @@ export function adaptToSoundfont(sequence, presets) {
     const list = presets.filter(p => !p.isDrum || p.isGMGSDrum);
     let substitutions = 0;
     for (const channel of sequence.channels) {
-        if (channel.source === 'chiptune' || channel.kind === 'comment' || channel.created === false || list.some(p => sameInstrument(p, channel))) continue;
+        if (channel.source === 'chiptune' || channel.kind === 'comment' || channel.kind === 'audio' || channel.created === false || list.some(p => sameInstrument(p, channel))) continue;
         const candidates = list.filter(p => !!p.isDrum === !!channel.isDrum);
         const fallback = candidates.find(p => p.program === channel.program && !p.bankMSB && !p.bankLSB)
             ?? candidates.find(p => p.program === channel.program)
