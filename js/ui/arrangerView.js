@@ -1114,6 +1114,7 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
         refresh: () => { markDirty(); },
         refreshAudio: updatePlayback,
         play, pause, stop,
+        getCursorTick: () => state.cursorTick,
         importWav: () => {relinkChannel=null;$('#arrWavFile').click();},
         reset() {
             audioFollower?.stop();audioFollower=null;selectedMarker=null;

@@ -1268,3 +1268,7 @@ input, textarea, [contenteditable="true"], .log-box { user-select: text; }
 .timestamp-fields input { width:100px; padding:8px; font:18px var(--mono); color:var(--text); background:var(--bg); border:1px solid var(--border-hl); }
 .timestamp-fields input::-webkit-inner-spin-button { opacity:1; height:32px; }
 .timestamp-dialog [data-formatted] { display:block; margin-top:12px; color:#ffe178; font:16px var(--mono); }
+.nsf-import-dialog { width:min(640px,94vw); max-height:92vh; overflow:auto; }
+.nsf-import-dialog progress { width:100%; accent-color:var(--accent); }
+.nsf-import-dialog [data-nsf-status] { white-space:pre-wrap; color:#ffdb7c; }
+.nsf-import-dialog [data-nsf-tracks] { padding-left:20px; font-size:12px; line-height:1.7; }

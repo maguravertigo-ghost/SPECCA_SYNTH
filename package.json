@@ -1,16 +1,18 @@
 {
   "name": "SPECCA_SYNTH",
-  "version": "1.18.0",
+  "version": "1.19.0",
   "main": "server.js",
   "scripts": {
     "test": "node --test",
     "start": "node server.js",
-    "build": "node scripts/build-browser.cjs"
+    "build": "node scripts/build-browser.cjs && node scripts/build-nsf.cjs",
+    "build:nsf": "node scripts/build-nsf.cjs"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "jsnes": "3.0.0",
     "spessasynth_core": "^4.4.10",
     "spessasynth_lib": "^4.4.8"
   },

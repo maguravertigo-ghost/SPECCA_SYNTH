@@ -1,3 +1,5 @@
+import {chooseNsfImport} from './ui/importNsfDialog.js';
+import {appendNsfTrace} from './editor/nsf.js';
 import { renderProjectWav } from './editor/renderWav.js';
 import { openWavExport } from './ui/exportWavDialog.js';
 import { openAudioEffects } from './ui/audioEffectsDialog.js';
@@ -430,6 +432,17 @@ menubar = mountMenubar({
     },
     openProject: openProjectDialog,
     open: () => document.getElementById('openMidiInput')?.click(),
+    importNsf: async () => {
+        const project=currentSequence;if(!project)return;
+        const offsetTick=arrangerView?.getCursorTick()??0;
+        arrangerView?.pause();pianoRoll?.stop();stopAllPlayback();
+        const choice=await chooseNsfImport({offsetTick});if(!choice||currentSequence!==project)return;
+        try{
+            const {sequence,count,noteCount}=appendNsfTrace(project,choice.trace,{offsetTick:choice.offsetTick,title:choice.trace.header.title||'NSF',song:choice.trace.song});
+            arrangerView?.stop();currentSequence=sequence;commitEdit();showArranger();
+            setStatus(`NSF imported: ${count} editable Chiptune lanes, ${noteCount} note segments${choice.trace.dpcm?' · DPCM samples not included':''}`);
+        }catch(error){setStatus(error.message);log(`NSF import: ${error}`,'error');}
+    },
     importWav: () => { showArranger(); arrangerView?.importWav(); },
     importChannels: () => document.getElementById('importMidiChannelsInput').click(),
 

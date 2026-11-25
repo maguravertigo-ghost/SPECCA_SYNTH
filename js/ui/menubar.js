@@ -5,6 +5,7 @@ const ACTIONS = {
     'file-new':          'new',
     'file-open':         'open',
     'file-import-channels': 'importChannels',
+    'file-import-nsf': 'importNsf',
     'file-import-wav': 'importWav',
     'file-open-project': 'openProject',
 	'file-project-settings': 'projectSettings',

@@ -7,8 +7,9 @@ export const CHIP_PRESETS = {
     hat: { name:'Noise Hat', wave:'noise', duty:.5, attack:.001, decay:.035, sustain:0, release:.015 },
 };
 export function chipSettings(input={}) {
-    const defaults={...CHIP_PRESETS.lead, transpose:0, fine:0, pitchAmount:0, pitchTime:.12, cutoff:20000, resonance:0};
+    const defaults={...CHIP_PRESETS.lead, noiseKeyTrack:false, transpose:0, fine:0, pitchAmount:0, pitchTime:.12, cutoff:20000, resonance:0};
     const out={...defaults,...input};
+    out.noiseKeyTrack=out.noiseKeyTrack===true;
     out.wave=['pulse','triangle','noise'].includes(out.wave)?out.wave:'pulse';
     for(const [key,min,max] of [['attack',.001,4],['decay',.005,4],['sustain',0,1],['release',.005,4],['duty',.05,.95],['transpose',-36,36],['fine',-100,100],['pitchAmount',-48,48],['pitchTime',.005,2],['cutoff',40,20000],['resonance',0,18]]) {
         out[key]=Number.isFinite(out[key])?Math.max(min,Math.min(max,out[key])):defaults[key];
@@ -56,8 +57,8 @@ export function buildChipBank(channels) {
         inst.push(...name(`Voice ${i}`),...u16(i));ibag.push(...u16(igen.length/4),0,0);
         igen.push(...gen(34,timecents(settings.attack)),...gen(36,timecents(settings.decay)),
             ...gen(37,settings.sustain<=0?1440:Math.round(-200*Math.log10(settings.sustain))),
-            ...gen(38,timecents(settings.release)),...gen(48,80),...gen(54,1),...gen(58,settings.wave==='noise'?60:48));
-        if(settings.wave==='noise')igen.push(...gen(56,0));
+            ...gen(38,timecents(settings.release)),...gen(48,80),...gen(54,1),...gen(58,settings.wave==='noise'?(settings.noiseKeyTrack?72:60):48));
+        if(settings.wave==='noise'&&!settings.noiseKeyTrack)igen.push(...gen(56,0));
         igen.push(...gen(51,settings.transpose),...gen(52,Math.round(settings.fine)),
             ...gen(8,Math.min(13500,Math.round(1200*Math.log2(settings.cutoff/8.176)))),...gen(9,Math.round(settings.resonance*10)));
         if(settings.pitchAmount) igen.push(...gen(7,Math.round(settings.pitchAmount*100)),...gen(26,timecents(.001)),
