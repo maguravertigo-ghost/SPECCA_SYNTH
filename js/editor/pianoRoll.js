@@ -1400,6 +1400,8 @@ export function mountPianoRoll(rootEl, opts = {}) {
             state.channel = channel;
             state.placementId = placement?.id ?? null;
             state.anchorTick = placement?.startTick ?? 0;
+            const info=getChannelInfo();
+            $('#prEditStatus').textContent=info?.nsfSource ? 'NSF: editable notes on the grid. Fade automation controls volume; it does not replace notes.' : '';
         },
         refreshChannelMute,
         refreshAudio: scheduleHotReload,

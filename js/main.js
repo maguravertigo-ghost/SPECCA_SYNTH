@@ -1,3 +1,4 @@
+import {importWav} from './core/audioTracks.js';
 import {chooseNsfImport} from './ui/importNsfDialog.js';
 import {appendNsfTrace} from './editor/nsf.js';
 import { renderProjectWav } from './editor/renderWav.js';
@@ -438,9 +439,17 @@ menubar = mountMenubar({
         arrangerView?.pause();pianoRoll?.stop();stopAllPlayback();
         const choice=await chooseNsfImport({offsetTick});if(!choice||currentSequence!==project)return;
         try{
-            const {sequence,count,noteCount}=appendNsfTrace(project,choice.trace,{offsetTick:choice.offsetTick,title:choice.trace.header.title||'NSF',song:choice.trace.song});
+            let dpcmAsset=null;
+            if(choice.trace.dpcmAudio){
+                setStatus('Saving DPCM audio layer in this browser…');
+                await initSynth();if(currentSequence!==project)return;
+                const name=`${choice.trace.header.title||'NSF'} #${choice.trace.song} - DPCM.wav`;
+                dpcmAsset=await importWav(new File([choice.trace.dpcmAudio.buffer],name,{type:'audio/wav'}),getAudioContext());
+                if(currentSequence!==project)return;
+            }
+            const {sequence,count,noteCount,audioCount}=appendNsfTrace(project,choice.trace,{offsetTick:choice.offsetTick,title:choice.trace.header.title||'NSF',song:choice.trace.song,dpcmAsset});
             arrangerView?.stop();currentSequence=sequence;commitEdit();showArranger();
-            setStatus(`NSF imported: ${count} editable Chiptune lanes, ${noteCount} note segments${choice.trace.dpcm?' · DPCM samples not included':''}`);
+            setStatus(`NSF imported: ${count} editable Chiptune lanes, ${noteCount} note segments${audioCount?' + DPCM audio layer':choice.trace.dpcm?' · DPCM not included':''}`);
         }catch(error){setStatus(error.message);log(`NSF import: ${error}`,'error');}
     },
     importWav: () => { showArranger(); arrangerView?.importWav(); },

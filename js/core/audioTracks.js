@@ -11,10 +11,14 @@ async function store(mode,callback){
     return new Promise((resolve,reject)=>{const transaction=database.transaction('assets',mode),request=callback(transaction.objectStore('assets'));
         transaction.oncomplete=()=>resolve(request.result);transaction.onerror=()=>reject(transaction.error);transaction.onabort=()=>reject(transaction.error??new Error('Audio storage cancelled'));});
 }
+export async function getAudioAssetFile(asset){
+    const blob=await store('readonly',s=>s.get(asset.id));
+    if(!blob)throw new Error(`Missing audio: ${asset.name}. Relink the WAV or reimport its NSF. Audio is stored in this browser.`);
+    return blob;
+}
 export async function decodeAsset(asset,context){
     if(buffers.has(asset.id))return buffers.get(asset.id);
-    const blob=await store('readonly',s=>s.get(asset.id));
-    if(!blob)throw new Error(`Missing audio: ${asset.name}. Import the original WAV again. Audio is stored in this browser.`);
+    const blob=await getAudioAssetFile(asset);
     const buffer=await context.decodeAudioData(await blob.arrayBuffer());buffers.set(asset.id,buffer);return buffer;
 }
 export async function importWav(file,context){

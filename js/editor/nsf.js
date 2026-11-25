@@ -1,3 +1,4 @@
+import {timelineId} from './timeline.js';
 import {Sequence} from './sequence.js';
 import {chipSettings} from './chiptune.js';
 
@@ -42,7 +43,7 @@ export function createNsfCollector(){
     };
 }
 
-export function appendNsfTrace(project,trace,{offsetTick=0,title='NSF',song=1}={}){
+export function appendNsfTrace(project,trace,{offsetTick=0,title='NSF',song=1,dpcmAsset=null}={}){
     const sequence=Sequence.fromJSON(project.toJSON(0)),order=sequence.orderedChannels().map(c=>c.channel),used=new Set(sequence.channels.map(c=>c.channel));
     const origin=sequence.ticksToSeconds(offsetTick),toTick=seconds=>Math.max(0,Math.round(sequence.secondsToTicks(origin+seconds)));
     const chunk=sequence.ticksPerBar*8;let count=0,noteCount=0;
@@ -77,7 +78,14 @@ export function appendNsfTrace(project,trace,{offsetTick=0,title='NSF',song=1}={
         }
         count++;
     }
-    if(!count)throw new Error('No audible standard NES notes were found in the selected time range. Try another song or a longer duration.');
+    let audioCount=0;
+    if(dpcmAsset){
+        const lane=Array.from({length:2048},(_,i)=>i).find(i=>!used.has(i));if(lane===undefined)throw new Error('Not enough free channels for the DPCM audio layer.');
+        sequence.audioAssets.push(dpcmAsset);order.push(lane);
+        sequence.channels.push({channel:lane,name:`${title} #${song} · DPCM audio`,source:'audio',kind:'audio',volume:80,pan:64,muted:false,created:true,nsfSource:{song,voice:'dpcm'}});
+        sequence.audioClips.push({id:timelineId('dpcm'),channel:lane,assetId:dpcmAsset.id,startSeconds:origin,offsetSeconds:0,duration:dpcmAsset.duration});audioCount=1;
+    }
+    if(!count&&!audioCount)throw new Error('No audible standard NES notes were found in the selected time range. Try another song or a longer duration.');
     sequence.channelOrder=order;
-    return {sequence,count,noteCount};
+    return {sequence,count,noteCount,audioCount};
 }

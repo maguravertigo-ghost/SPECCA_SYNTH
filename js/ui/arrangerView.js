@@ -1,5 +1,5 @@
 import {audioEnd, timelineId, formatTimestamp, layoutMarkers, wavePath} from '../editor/timeline.js';
-import {importWav,prepareAudio,createAudioFollower} from '../core/audioTracks.js';
+import {importWav,prepareAudio,createAudioFollower,getAudioAssetFile} from '../core/audioTracks.js';
 import {getAudioContext,getAudioOutput} from '../core/synth.js';
 import {editTimestamp} from './timestampDialog.js';
 import { chooseChannelSplit } from './splitChannelDialog.js';
@@ -236,7 +236,11 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
     }
     function openAudioMenu(info){
         const song=getSeq();
-        actionMenu(info.name,[['Edit name / start time…',()=>editAudioChannel(info.channel)],['Replace / relink WAV…',()=>{relinkChannel=info;$('#arrWavFile').click();}],['Mixer…',()=>onMixer?.()],['Clone audio channel',()=>{haltPlayback();song.cloneChannel(info.channel);edit();}],['Move up',()=>{song.moveChannel(info.channel,-1);edit(false);}],['Move down',()=>{song.moveChannel(info.channel,1);edit(false);}],['Delete audio channel',async()=>{
+        actionMenu(info.name,[['Edit name / start time…',()=>editAudioChannel(info.channel)],['Download source WAV…',async()=>{
+            try{const clip=song.audioClips.find(c=>c.channel===info.channel),asset=song.audioAssets.find(a=>a.id===clip?.assetId);if(!asset)return;
+                const file=await getAudioAssetFile(asset),url=URL.createObjectURL(file),link=document.createElement('a');link.href=url;link.download=asset.name.replace(/[<>:"/\\|?*\u0000-\u001f]/g,'_');link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+            }catch(error){setStatus(error.message);}
+        }],['Replace / relink WAV…',()=>{relinkChannel=info;$('#arrWavFile').click();}],['Mixer…',()=>onMixer?.()],['Clone audio channel',()=>{haltPlayback();song.cloneChannel(info.channel);edit();}],['Move up',()=>{song.moveChannel(info.channel,-1);edit(false);}],['Move down',()=>{song.moveChannel(info.channel,1);edit(false);}],['Delete audio channel',async()=>{
             if(!await confirmAction('Delete audio channel',`Delete ${info.name} and its audio clip?`)||song!==getSeq())return;
             haltPlayback();song.channels=song.channels.filter(c=>c!==info);song.channelOrder=song.channelOrder.filter(id=>id!==info.channel);song.audioClips=song.audioClips.filter(c=>c.channel!==info.channel);edit();
         }]]);
@@ -348,7 +352,7 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
                                    border-color:${muted ? '#666' : '#1a7f37'};"></span>`;
             html += `    <div class="arr-chan-info">`;
             html += `      <div class="arr-chan-name">${escapeHtml(ch.name || ('Ch ' + (i + 1)))}</div>`;
-            html += `      <div class="arr-chan-pat">${escapeHtml(comment ? 'Comment' : ch.kind==='audio' ? 'WAV audio · original speed' : instrumentLabel(ch, catalog))}</div>`;
+            html += `      <div class="arr-chan-pat">${escapeHtml(comment ? 'Comment' : ch.kind==='audio' ? ch.nsfSource?.voice==='dpcm'?'DPCM audio · sampled layer':'WAV audio · original speed' : instrumentLabel(ch, catalog))}</div>`;
             html += `    </div>`;
             html += `    <span class="arr-chan-bar" style="background:${color}"></span>`;
             html += `  </div>`;

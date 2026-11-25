@@ -9,6 +9,11 @@ export class NsfMachine {
         this.cpu.mem.fill(0);this.cpu.REG_SP=0xfd;
         this.cpu.ppu={dotTarget:0,nextEventDot:Infinity,nmiOutput:false,nmiAtPoll:false,catchUp(){},runCycleExact(){this.nextEventDot=Infinity;}};
         this.apu=nes.papu=new PAPU(nes);this.cpu.papu=this.apu;
+        this.onDac=null;this.apuCycle=null;
+        const clockCycle=this.apu.clockCycle.bind(this.apu);
+        this.apu.clockCycle=cycle=>{this.apuCycle=cycle;try{return clockCycle(cycle);}finally{this.apuCycle=null;}};
+        const update=this.apu.dmc._updateSample.bind(this.apu.dmc);
+        this.apu.dmc._updateSample=()=>{this.onDac?.(this.apuCycle??this.cpu.cycles,this.apu.dmc.outputLevel);update();};
         const payload=bytes.subarray(128),banked=header.banks.some(Boolean);
         const rom=new Uint8Array(Math.ceil(((header.load&4095)+payload.length)/4096)*4096);rom.set(payload,header.load&4095);
         const mapBank=(slot,bank)=>{const data=rom.subarray(bank*4096,(bank+1)*4096);this.cpu.mem.fill(0,0x8000+slot*4096,0x9000+slot*4096);this.cpu.mem.set(data,0x8000+slot*4096);};
@@ -35,7 +40,16 @@ export class NsfMachine {
         while(cpu.REG_PC!==0x5000){if(cpu.cycles-start>maxCycles)throw new Error('NSF routine did not return within the CPU budget. This driver is not supported.');cpu.emulate();}
         this.apu.catchUp(cpu.cycles);
     }
-    advance(cycle){if(cycle>this.cpu.cycles){this.cpu.cycles=Math.ceil(cycle);this.apu.catchUp(this.cpu.cycles);if(this.cpu.irqFlags&&!this.cpu.F_INTERRUPT)throw new Error('IRQ-driven NSF playback is not supported by this host.');}}
+    advance(cycle){
+        const target=Math.ceil(cycle),cpu=this.cpu,apu=this.apu;
+        // The music routine is idle, but DMC DMA must still fetch from the
+        // currently mapped ROM. Never jump across a DMA request with stale data.
+        while(cpu.cycles<target){
+            if(cpu.dmaNeedHalt)cpu.read(0x5000);
+            else {cpu.cycles=Math.min(target,Math.max(cpu.cycles+1,apu.nextEventCycle));apu.catchUp(cpu.cycles);}
+            if(cpu.irqFlags&&!cpu.F_INTERRUPT)throw new Error('IRQ-driven NSF playback is not supported by this host.');
+        }
+    }
     snapshot(){
         const a=this.apu,states=[];
         for(const s of [a.square1,a.square2]){
