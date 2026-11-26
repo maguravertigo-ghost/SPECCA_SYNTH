@@ -1272,3 +1272,23 @@ input, textarea, [contenteditable="true"], .log-box { user-select: text; }
 .nsf-import-dialog progress { width:100%; accent-color:var(--accent); }
 .nsf-import-dialog [data-nsf-status] { white-space:pre-wrap; color:#ffdb7c; }
 .nsf-import-dialog [data-nsf-tracks] { padding-left:20px; font-size:12px; line-height:1.7; }
+/* Automation uses the exact Piano Roll time-axis geometry, not a pattern-wide fit. */
+.automation-editor { padding:0; gap:0; background:#101624b8; overflow:hidden; }
+.automation-editor .automation-tools { position:absolute; left:0; right:0; top:0; z-index:2; margin:0; gap:7px; padding:7px; }
+.automation-grid-tools { display:flex; width:100%; align-items:center; flex-wrap:wrap; gap:8px 14px; border-top:1px solid #ffffff22; padding-top:6px; }
+.automation-grid-tools label { display:flex; align-items:center; gap:5px; font-size:12px; }
+.automation-grid-tools [data-grid-y] { width:60px; }
+.automation-grid-tools [data-snap] { border:1px solid #536379; border-radius:14px; padding:4px 10px; background:#303747; color:#ddd; }
+.automation-grid-tools [data-snap][aria-checked="true"] { background:#194d3d; color:#9af0c3; border-color:#48a979; }
+.automation-plot { position:absolute; right:0; min-height:0; overflow:hidden; background:#10162440; }
+.automation-editor .automation-plot svg { display:block; width:100%; height:100%; min-height:0; }
+.automation-editor small { position:absolute; left:0; right:0; bottom:0; font-size:11px; margin:0; }
+.automation-grid-x path,.automation-grid-y path { stroke:#ffffff1f; fill:none; stroke-width:1; pointer-events:none; }
+.automation-grid-x .is-bar { stroke:#b1cee05e; }
+.automation-neutral { stroke:#ffffff55; stroke-dasharray:5 5; fill:none; pointer-events:none; }
+.automation-note-guides { fill:none; stroke:#7ee8b53b; stroke-width:1; stroke-dasharray:2 4; pointer-events:none; }
+.automation-note-guides .note-span { stroke:#7ee8b5aa; stroke-width:3; stroke-dasharray:none; }
+.automation-curve-path { stroke:currentColor; stroke-width:2; fill:none; pointer-events:none; }
+.automation-plot circle { cursor:grab; stroke:#101624; stroke-width:1; }
+.automation-plot [data-point-status] { position:absolute; right:8px; bottom:8px; background:#101624cc; color:#dfeafa; padding:3px 6px; pointer-events:none; font:11px var(--mono); }
+.automation-tools select,.automation-tools input[type="number"],.automation-tools button { background:#202d40; color:#e1ebf8; border:1px solid #46556c; border-radius:4px; font-size:12px; padding:3px 6px; }

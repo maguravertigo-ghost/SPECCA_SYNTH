@@ -278,6 +278,7 @@ export function mountPianoRoll(rootEl, opts = {}) {
         clampScroll();
         clampScrollY();
 
+        automationEditor.syncViewport();
         const ps = pitches();
         const cw = cellW();
         const ts = totalSteps();
@@ -997,7 +998,9 @@ export function mountPianoRoll(rootEl, opts = {}) {
         indicator.dataset.state = channel?.muted ? 'muted' : 'on';
         if (indicator.textContent !== status) indicator.textContent = status;
     };
-    const automationEditor = mountAutomationEditor({ host: wrap, button: $('#prEffects'), getPattern,
+    const automationEditor = mountAutomationEditor({ host: wrap, button: $('#prEffects'), getPattern, onWheel,
+        getViewport: () => ({labelWidth:LABEL_W,headerHeight:HEADER_H,rowHeight:ROW_H,scrollY:state.scrollY,
+            stepTicks:stepTicks(),stepWidth:cellW(),scrollX:state.scrollX,timeDivision:getTimeDiv(),ticksPerBar:getSeq()?.ticksPerBar??1920}),
         onCommit: () => { dirty = true; scheduleHotReload(); onEdit?.(); },
     });
     manualKeyboard = mountManualKeyboard({
@@ -1347,7 +1350,7 @@ export function mountPianoRoll(rootEl, opts = {}) {
     document.addEventListener('keydown', (e) => {
         const active = document.activeElement;
         if (isComment() || !state.visible || rootEl.inert || pickerEl?.open || document.querySelector('dialog[open], .pr-picker-overlay:not(.hidden), .arr-dialog-overlay') ||
-            active?.closest('input, textarea, select, [contenteditable="true"]')) return;
+            active?.closest('input, textarea, select, .automation-editor, [contenteditable="true"]')) return;
         const action = (e.ctrlKey || e.metaKey) && !e.altKey
             ? shortcuts[e.code] ?? shortcuts[`Key${e.key.toUpperCase()}`]
             : (e.key === 'Delete' || e.key === 'Backspace') && 'delete';
@@ -1415,6 +1418,7 @@ export function mountPianoRoll(rootEl, opts = {}) {
         destroy() {
             audioFollower?.stop();
             manualKeyboard?.destroy();
+            automationEditor.destroy();
             cancelAnimationFrame(rafId);
             ro.disconnect();
             stop();
