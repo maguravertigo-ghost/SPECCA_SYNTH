@@ -57,3 +57,14 @@ export function adaptToSoundfont(sequence, presets) {
     }
     return substitutions;
 }
+
+// Explicit numbering avoids confusing MIDI's zero-based program byte with UI program numbers.
+export function instrumentTooltip(channel, label) {
+    if (!channel) return '';
+    if (channel.source === 'chiptune') return label;
+    const patch = p => `Program ${ (p.program ?? 0) + 1 } (MIDI ${p.program ?? 0}) · Bank ${p.bankMSB ?? 0}:${p.bankLSB ?? 0}`;
+    const lines = [label, `${channel.isDrum ? 'Drum kit' : instrumentFamily(channel)} · ${patch(channel)}`];
+    if (channel.sourcePatch) lines.push(`SoundFont fallback · original: ${patch(channel.sourcePatch)}`);
+    if (Number.isInteger(channel.sourceTrack)) lines.push(`MIDI track ${channel.sourceTrack} · port ${channel.sourcePort ?? 0} · channel ${(channel.source ?? 0) + 1}`);
+    return lines.join('\n');
+}

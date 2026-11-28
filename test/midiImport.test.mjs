@@ -100,3 +100,19 @@ test('more than 16 parts get separate lanes and remain audible-addressable after
     }
     assert.ok(restored.channels.some(c => c.created && c.sourcePort === 1));
 });
+
+test('editable MIDI import preserves explicit CC91/93/94 sends, including dry reverb', () => {
+    const events = [
+        0,0xb0,0,0, 0,0xb0,32,0, 0,0xc0,73,
+        0,0xb0,91,0, 0,0xb0,93,27, 0,0xb0,94,13,
+        0,0x90,60,100, 120,0x80,60,0,
+        0,0xc1,32, 0,0x91,48,100, 120,0x81,48,0,
+    ];
+    const seq = importMidi(makeMidi(events));
+    const flute = seq.channels.find(c=>c.created&&c.program===73);
+    assert.equal(flute.bankMSB,0);assert.equal(flute.bankLSB,0);
+    assert.deepEqual(flute.sends,{reverb:0,chorus:27,delay:13});
+    assert.deepEqual(seq.channels.find(c=>c.created&&c.program===32).sends,{reverb:40,chorus:0,delay:0});
+    const roundtrip = importMidi(writeArrangementMIDI(seq));
+    assert.deepEqual(roundtrip.channels.find(c=>c.created&&c.program===73).sends,flute.sends);
+});

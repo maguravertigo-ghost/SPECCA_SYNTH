@@ -1,3 +1,4 @@
+import {defaultEffects} from './audioEffects.js';
 import { BasicMIDI } from '../../main.min.js';
 import { Sequence } from './sequence.js';
 
@@ -37,6 +38,7 @@ export function importMidi(buffer, name = '') {
     if (meter) seq.stepsPerBar = Math.max(1, Math.round(meter.data[0] * 16 / (2 ** meter.data[1])));
     const barTicks = seq.ticksPerBar;
     seq.patternLengthTicks = barTicks;
+    seq.effects = defaultEffects();
     seq.channels = Array.from({ length: 16 }, (_, channel) => ({
         channel, program: 0, isDrum: channel === 9, volume: 100, pan: 64, created: false,
     }));
@@ -46,7 +48,7 @@ export function importMidi(buffer, name = '') {
         if (!ports.has(port)) ports.set(port, {
             mode: 'gm', channels: Array.from({ length: 16 }, (_, channel) => ({
                 program: 0, isDrum: channel === 9, bankMSB: 0, bankLSB: 0, volume: 100, pan: 64,
-                pending: new Map(), groups: new Map(),
+                sends: {reverb:40,chorus:0,delay:0}, pending: new Map(), groups: new Map(),
             })),
         });
         return ports.get(port);
@@ -100,7 +102,7 @@ export function importMidi(buffer, name = '') {
                 if (!group) {
                     group = { source, sourcePort, sourceTrack: trackNumber + 1,
                         program: patch.program, isDrum, bankMSB, bankLSB, name: track.name?.trim(),
-                        volume: local.volume ?? ch.volume, pan: local.pan ?? ch.pan, notes: [] };
+                        volume: local.volume ?? ch.volume, pan: local.pan ?? ch.pan, sends: {...ch.sends,...local.sends}, notes: [] };
                     ch.groups.set(key, group);
                     groups.push(group);
                 }
@@ -134,6 +136,10 @@ export function importMidi(buffer, name = '') {
                     }
                 }
                 if (a === 10) local.pan = ch.pan = b;
+                if ([91,93,94].includes(a)) {
+                    const id = {91:'reverb',93:'chorus',94:'delay'}[a];
+                    local.sends ??= {}; local.sends[id] = ch.sends[id] = b;
+                }
                 break;
         }
     });
@@ -152,8 +158,8 @@ export function importMidi(buffer, name = '') {
                 ?? seq.channels.length;
         } else primary.add(channel);
         occupied.add(channel);
-        const { program, isDrum, bankMSB, bankLSB, volume, pan, source, sourcePort, sourceTrack } = group;
-        seq.channels[channel] = { channel, program, isDrum, bankMSB, bankLSB, volume, pan,
+        const { program, isDrum, bankMSB, bankLSB, volume, pan, sends, source, sourcePort, sourceTrack } = group;
+        seq.channels[channel] = { channel, program, isDrum, bankMSB, bankLSB, volume, pan, sends,
             source, sourcePort, sourceTrack,
             name: group.name || (isDrum ? `Drums · Ch ${channel + 1}` : `Ch ${channel + 1}`), created: true };
         buildPatterns(seq, channel, group.notes, barTicks);

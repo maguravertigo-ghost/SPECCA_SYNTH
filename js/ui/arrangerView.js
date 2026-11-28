@@ -12,7 +12,7 @@ import { getSequencer, applyChannelVolume, applyChannelMix, initSynth, bindMaste
 import { writeArrangementMIDI } from '../editor/exportMidi.js';
 import { getInstrumentCatalog, mountInstrumentFields } from './instrumentFields.js';
 import { confirmAction } from './dialogs.js';
-import { instrumentLabel } from '../editor/instruments.js';
+import { instrumentLabel, instrumentTooltip } from '../editor/instruments.js';
 
 const CHAN_W     = 160;
 const RULER_H    = 24;
@@ -322,7 +322,14 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
         const header = rows.querySelector(`.arr-chan[data-channel="${channel}"]`);
         if (header) header.title = channelTooltip(channel);
     };
-    const channelTooltip = channel => getSeq()?.channels.find(c=>c.channel===channel)?.kind==='audio' ? 'WAV audio · click to edit start time, name and mix · right-click for options' : `Ch ${channel + 1} · Draw: ${getChannelPattern?.(channel)?.name ?? 'New pattern'} · Right-click for options`;
+    const channelTooltip = channel => {
+        const ch = getSeq()?.channels.find(c=>c.channel===channel);
+        if (!ch) return '';
+        const name = ch.name || `Ch ${channel + 1}`;
+        if (ch.kind === 'audio') return `${name}\nWAV audio · click to edit start time, name and mix · right-click for options`;
+        if (ch.kind === 'comment') return `${name}\nComment · Right-click for options`;
+        return `${name}\n${instrumentTooltip(ch, instrumentLabel(ch, getInstrumentCatalog()))}\nDraw: ${getChannelPattern?.(channel)?.name ?? 'New pattern'} · Right-click for options`;
+    };
 
     const renderRows = () => {
         const s = getSeq();

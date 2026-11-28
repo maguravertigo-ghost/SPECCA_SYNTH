@@ -12,7 +12,7 @@ import { getInstrumentLabel, mountInstrumentFields } from '../ui/instrumentField
 import { chooseGeneratedNotes } from '../ui/generateNotesDialog.js';
 import { generatePatternNotes, withoutNoteConflicts } from './noteGenerator.js';
 import { confirmAction } from '../ui/dialogs.js';
-import { instrumentFamily } from './instruments.js';
+import { instrumentTooltip } from './instruments.js';
 import { log } from '../core/log.js';
 import { copyNotes, planPaste } from './noteClipboard.js';
 import { writePatternMIDI, writePatternMixMIDI } from './exportMidi.js';
@@ -1050,9 +1050,11 @@ export function mountPianoRoll(rootEl, opts = {}) {
         automationEditor.refresh();
         const channel = getChannelInfo();
         const pattern = getPattern();
-        $('#prChannelName').textContent = channel ? channel.name || `Ch ${channel.channel + 1}` : 'Piano Roll';
+        const channelName = $('#prChannelName');
+        channelName.textContent = channel ? channel.name || `Ch ${channel.channel + 1}` : 'Piano Roll';
+        channelName.title = channel ? `${channelName.textContent}\n${instrumentTooltip(channel, getInstrumentLabel(channel))}` : '';
         instrumentBtn.textContent = channel ? `Instrument: ${getInstrumentLabel(channel)}` : 'Instrument…';
-        instrumentBtn.title = channel ? instrumentFamily(channel) : '';
+        instrumentBtn.title = channel ? instrumentTooltip(channel, getInstrumentLabel(channel)) : '';
         const comment = isComment();
         $('#prChipSynth').hidden = comment || channel?.source !== 'chiptune';
         refreshChannelMute();
@@ -1078,6 +1080,7 @@ export function mountPianoRoll(rootEl, opts = {}) {
         $('#prFixNotes').disabled = !pattern;
         patternSelect.replaceChildren(...patterns.map(p => new Option(p.name, p.id)));
         if (pattern) patternSelect.value = pattern.id;
+        patternSelect.title = pattern?.name ?? '';
     };
     const resetViewport = () => {
         state.selection.clear();

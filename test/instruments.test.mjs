@@ -17,3 +17,10 @@ test('missing soundbank variants keep their program when available and drums sta
     assert.deepEqual(seq.channels.map(c => [c.program, c.isDrum, c.presetName]), [[33, false, 'Bass'], [0, true, 'Kit'], [0, false, undefined]]);
     assert.equal(seq.channels[0].sourcePatch.bankMSB, 100);
 });
+
+test('instrument tooltip includes full name, patch numbers and original fallback assignment', async () => {
+    const {instrumentTooltip} = await import('../js/editor/instruments.js');
+    const text = instrumentTooltip({program:73,bankMSB:0,bankLSB:0,sourcePatch:{program:73,bankMSB:8,bankLSB:1},sourceTrack:2,sourcePort:0,source:3},'A long full preset name');
+    assert.match(text,/A long full preset name/);assert.match(text,/Program 74 \(MIDI 73\)/);
+    assert.match(text,/original:.*Bank 8:1/);assert.match(text,/MIDI track 2 · port 0 · channel 4/);
+});

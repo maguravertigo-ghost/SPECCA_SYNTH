@@ -1328,3 +1328,10 @@ input, textarea, [contenteditable="true"], .log-box { user-select: text; }
 
 .menu-category { padding:6px 12px 3px; color:var(--text-mut); font-size:10px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; user-select:none; }
 .menu[data-menu="file"] > .menu-dropdown { max-height:calc(100dvh - 52px); overflow-y:auto; }
+/* Long imported names must not push FIX or other pattern controls off screen. */
+.pr-layer-bar { flex-wrap:wrap; min-width:0; }
+#prChannelName { flex:0 1 auto; min-width:0; max-width:clamp(100px,14vw,190px); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+#prInstrumentBtn { flex:0 1 auto; min-width:0; max-width:clamp(130px,19vw,260px); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+#prPatternField { min-width:0; }
+#prPatternSelect { min-width:0; max-width:110px; text-overflow:ellipsis; }
+.pr-layer-bar > :not(#prChannelName):not(#prInstrumentBtn) { flex-shrink:0; }
