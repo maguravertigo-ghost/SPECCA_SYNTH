@@ -283,6 +283,7 @@ if (arrangerRoot) {
         getChannelPattern,
         onSelectPattern: (channel, id) => selectedPatterns.set(channel, id),
         onEdit: commitEdit,
+        onTempoEdit: () => { refreshProjectTempo(); pianoRoll?.refresh(); },
         onMixer: showProjectMixer,
         onAudioEffects: showAudioEffects,
         onOpenChannel: (channel, patternId, placement) => {

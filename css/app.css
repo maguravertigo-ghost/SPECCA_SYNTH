@@ -1335,3 +1335,18 @@ input, textarea, [contenteditable="true"], .log-box { user-select: text; }
 #prPatternField { min-width:0; }
 #prPatternSelect { min-width:0; max-width:110px; text-overflow:ellipsis; }
 .pr-layer-bar > :not(#prChannelName):not(#prInstrumentBtn) { flex-shrink:0; }
+/* Global conductor/tempo lane. It is not a MIDI instrument channel. */
+.arr-tempo-lane { display:flex; height:80px; position:relative; border-bottom:1px solid #887a4266; background:#232118; }
+.arr-tempo-heading { position:sticky; left:0; z-index:12; flex:0 0 160px; width:160px; box-sizing:border-box; display:flex; flex-direction:column; align-items:flex-start; justify-content:center; gap:8px; padding:6px 12px; background:#29261c; border-right:1px solid var(--border); }
+.arr-tempo-heading > button:first-child { background:none; border:0; color:#ffe599; cursor:pointer; font-weight:700; padding:0; }
+.arr-tempo-heading .btn { font-size:10px; padding:3px 6px; }
+.arr-tempo-grid { min-width:0; flex:1; background:repeating-linear-gradient(to right,transparent 0,transparent calc(var(--bar-w) - 1px),#aa995522 calc(var(--bar-w) - 1px),#aa995522 var(--bar-w)); }
+.arr-tempo-grid svg { display:block; overflow:hidden; }
+.arr-tempo-path { fill:none; stroke:#e9ce76; stroke-width:2; pointer-events:none; }
+.arr-tempo-grid g { cursor:pointer; outline:none; }
+.arr-tempo-grid circle { fill:#f6d96f; stroke:#282319; stroke-width:2; }
+.arr-tempo-grid text { fill:#ffe9a5; font:10px var(--mono); }
+.arr-tempo-grid g:focus circle,.arr-tempo-grid g:hover circle { stroke:#fff; stroke-width:3; }
+.tempo-point-dialog { width:min(440px,92vw); }
+.tempo-point-dialog [data-position] { color:var(--text-mut); font-size:12px; }
+.arr-tempo-heading [data-tempo-current] { font:10px var(--mono); color:#d3c286; }

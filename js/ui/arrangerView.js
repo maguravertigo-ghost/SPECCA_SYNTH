@@ -1,3 +1,4 @@
+import {renderTempoLane} from './tempoLane.js';
 import {formatPlayheadTime,parsePlayheadTime,snapPlayheadTick} from '../editor/playhead.js';
 import {audioEnd, timelineId, formatTimestamp, layoutMarkers, wavePath} from '../editor/timeline.js';
 import {importWav,prepareAudio,createAudioFollower,getAudioAssetFile} from '../core/audioTracks.js';
@@ -30,7 +31,7 @@ const escapeHtml = (text) => String(text).replace(/[&<>"']/g, (ch) => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
 }[ch]));
 
-export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelectPattern, onOpenChannel, onEdit, onMixer } = {}) {
+export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelectPattern, onOpenChannel, onEdit, onMixer, onTempoEdit } = {}) {
     if (!rootEl) return null;
 
     rootEl.innerHTML = `
@@ -69,6 +70,7 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
                         <div class="arr-loop-mark end" id="arrLoopEnd" data-edge="end" title="Loop end"><span class="material-icon" aria-hidden="true">arrow_left</span></div>
                     </div>
                     <div class="arr-ruler" id="arrRuler" style="height:${RULER_H}px"></div>
+                    <div id="arrTempoLane" class="arr-tempo-lane"></div>
                     <div class="arr-rows" id="arrRows"></div>
                     <div class="arr-playhead" id="arrPlayhead"></div>
                 </div>
@@ -165,7 +167,7 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
         if (!song) return { end: 0, playable: 0 };
         const patterns = new Map(song.patterns.map(p => [p.id, p]));
         const comments = new Set(song.channels.filter(c => c.kind === 'comment').map(c => c.channel));
-        let playable = song.secondsToTicks(audioEnd(song)), end = Math.max(playable,...song.timeMarkers.map(m=>song.secondsToTicks(m.seconds)));
+        let playable = song.secondsToTicks(audioEnd(song)), end = Math.max(playable,...song.tempoChanges.map(p=>p.tick),...song.timeMarkers.map(m=>song.secondsToTicks(m.seconds)));
         for (const clip of song.arrangement) {
             const pattern = patterns.get(clip.patternId);
             if (!pattern) continue;
@@ -424,6 +426,8 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
         }
         audioFollower?.update(seq?.currentTime??0,playing&&!loading,hasLoop()?song.ticksToSeconds(effectiveLoopEnd()):Infinity);
         lastFramePlaying = playing;
+        const tempoNow=$('[data-tempo-current]');
+        if(tempoNow)tempoNow.value=`${Number(song.tempoAt(state.cursorTick).toFixed(2))} BPM now`;
         const x = tickToX(state.cursorTick);
         let scrollLeft = body.scrollLeft;
         if (follow && playing && !loading && !state.dragMode && !state.paint && viewportWidth > CHAN_W) {
@@ -457,6 +461,14 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
         viewportWidth = body.clientWidth;
         layoutBarWidth = Math.max(MIN_BAR_W, (viewportWidth - CHAN_W) / totalBars());
         renderRuler();
+        const tempoSequence=getSeq();
+        renderTempoLane($('#arrTempoLane'), {sequence:getSeq(),width:CHAN_W+totalBars()*barW(),tickToX,xToTick,ticksPerBar:tpb(),
+            getCursorTick:()=>state.cursorTick,getSnapBars:()=>snapBars,onCommit:mutation=>{
+                const song=getSeq();
+                // The closure belongs to this render; a dialog must not edit a replaced project.
+                if(song!==tempoSequence)return;
+                haltPlayback();mutation();edit();onTempoEdit?.();
+            }});
         renderRows();
         renderMarkers();
     };
