@@ -1,3 +1,4 @@
+import {formatPlayheadTime,parsePlayheadTime,snapPlayheadTick} from '../editor/playhead.js';
 import {audioEnd, timelineId, formatTimestamp, layoutMarkers, wavePath} from '../editor/timeline.js';
 import {importWav,prepareAudio,createAudioFollower,getAudioAssetFile} from '../core/audioTracks.js';
 import {getAudioContext,getAudioOutput} from '../core/synth.js';
@@ -72,7 +73,7 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
                     <div class="arr-playhead" id="arrPlayhead"></div>
                 </div>
             </div>
-            <div class="arr-marker-tools"><button class="btn" type="button" id="arrImportWav" title="WAV at playhead · original speed · stored in this browser">Import WAV…</button><input type="file" accept=".wav,audio/wav" id="arrWavFile" hidden><span>Time markers</span><button class="btn" type="button" id="arrAddMarker">+ At playhead</button><button class="btn" type="button" id="arrPrevMarker" aria-label="Previous marker">◀</button><button class="btn" type="button" id="arrNextMarker" aria-label="Next marker">▶</button><button class="btn" type="button" id="arrEditMarker">Edit…</button><button class="btn" type="button" id="arrDeleteMarker">Delete</button></div><div class="arr-marker-strip" id="arrMarkerStrip" aria-label="Time markers"><div id="arrMarkerLabels"></div></div>
+            <div class="arr-marker-tools"><input type="file" accept=".wav,audio/wav" id="arrWavFile" hidden><span>Time markers</span><button class="btn" type="button" id="arrAddMarker">+ At playhead</button><button class="btn" type="button" id="arrPrevMarker" aria-label="Previous marker">◀</button><button class="btn" type="button" id="arrNextMarker" aria-label="Next marker">▶</button><button class="btn" type="button" id="arrEditMarker">Edit…</button><button class="btn" type="button" id="arrDeleteMarker">Delete</button><div class="arr-playhead-tools"><label for="arrPlayheadTime">Playhead</label><input id="arrPlayheadTime" type="text" value="00:00:00" placeholder="00:00:00" aria-label="Playhead timecode" title="Hours:minutes:seconds (optional .milliseconds). Enter or leave field to seek; Esc to cancel." spellcheck="false" autocomplete="off"><button class="btn" type="button" id="arrSnapBars" role="switch" aria-checked="false" title="Snap playhead on the ruler to the nearest bar start: B1, B2, B3… (timecode stays exact)">Snap bars: OFF</button></div></div><div class="arr-marker-strip" id="arrMarkerStrip" aria-label="Time markers"><div id="arrMarkerLabels"></div></div>
             <div class="arr-edit-hint">Channel name: edit notes <span>•</span> Grid: draw <span>•</span> Drag: move <span>•</span> Right click: erase</div>
         </div>
     `;
@@ -87,6 +88,20 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
     const loopStartEl = $('#arrLoopStart');
     const loopEndEl   = $('#arrLoopEnd');
     const timeEl      = $('#arrTime');
+    const playheadTime = $('#arrPlayheadTime');
+    const snapBarsBtn = $('#arrSnapBars');
+    let snapBars = false;
+    try { snapBars = localStorage.getItem('spessa-playhead-snap-bars') === 'true'; } catch {}
+    const updateSnapBars = () => {
+        snapBarsBtn.setAttribute('aria-checked', String(snapBars));
+        snapBarsBtn.textContent = `Snap bars: ${snapBars ? 'ON' : 'OFF'}`;
+    };
+    updateSnapBars();
+    snapBarsBtn.addEventListener('click', () => {
+        snapBars = !snapBars;
+        try { localStorage.setItem('spessa-playhead-snap-bars', String(snapBars)); } catch {}
+        updateSnapBars();
+    });
     const playBtn     = $('#arrPlay');
     const pauseBtn    = $('#arrPause');
     const loopBtn     = $('#arrLoopBtn');
@@ -245,11 +260,10 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
             haltPlayback();song.channels=song.channels.filter(c=>c!==info);song.channelOrder=song.channelOrder.filter(id=>id!==info.channel);song.audioClips=song.audioClips.filter(c=>c.channel!==info.channel);edit();
         }]]);
     }
-    $('#arrImportWav').onclick=()=>{relinkChannel=null;$('#arrWavFile').click();};
     $('#arrWavFile').onchange=async e=>{
         const file=e.target.files[0];e.target.value='';if(!file)return;
         const song=getSeq(),position=song.ticksToSeconds(state.cursorTick),replacement=relinkChannel;relinkChannel=null;haltPlayback();
-        $('#arrImportWav').disabled=true;
+        $('#arrWavFile').disabled=true;
         try{
             setStatus('Decoding WAV and drawing waveform…');
             await initSynth();const asset=await importWav(file,getAudioContext());if(song!==getSeq())return;
@@ -264,7 +278,7 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
             song.audioAssets.push(asset);song.channels.push({channel:lane,kind:'audio',source:'audio',name:file.name,volume:100,pan:64,muted:false,created:true});
             song.audioClips.push({id:timelineId('audio'),assetId:asset.id,channel:lane,startSeconds:position,offsetSeconds:0,duration:asset.duration});
             edit();setStatus('WAV imported at playhead · audio stored in this browser; Save preserves its reference.');
-        }catch(error){setStatus(error.message);log(`WAV import: ${error}`,'error');}finally{$('#arrImportWav').disabled=false;}
+        }catch(error){setStatus(error.message);log(`WAV import: ${error}`,'error');}finally{$('#arrWavFile').disabled=false;}
     };
 
     // ==================================================================
@@ -422,6 +436,11 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
         };
         const timeText = `${fmt(song.ticksToSeconds(state.cursorTick))} / ${fmt(song.ticksToSeconds(end))}`;
         if (timeEl.textContent !== timeText) timeEl.textContent = timeText;
+        if (document.activeElement !== playheadTime) {
+            playheadTime.value = formatPlayheadTime(song.ticksToSeconds(state.cursorTick));
+            playheadTime.setCustomValidity('');
+            playheadTime.removeAttribute('aria-invalid');
+        }
     };
 
     const render = () => {
@@ -811,7 +830,7 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
         }
         if (state.dragMode === 'seek' && e.pointerId === state.seekPointer) {
             const rect = ruler.getBoundingClientRect();
-            seekTick(xToTick(e.clientX - rect.left), false, false);
+            seekTick(rulerSeekTick(e.clientX - rect.left), false, false);
         }
         if (state.dragMode === 'loop-start' || state.dragMode === 'loop-end') {
             const rect = ruler.getBoundingClientRect();
@@ -889,7 +908,41 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
         }
         renderPlayhead();
     };
-    const seekTo = (x) => seekTick(xToTick(x));
+    const rulerSeekTick = (x) => {
+        const tick = snapPlayheadTick(xToTick(x), tpb(), snapBars);
+        // A partial final bar must not turn a snapped seek into an off-grid end tick.
+        const end = arrangementDurationTick() || totalBars() * tpb();
+        return snapBars ? Math.min(tick, Math.floor(end / tpb()) * tpb()) : tick;
+    };
+    const seekTo = (x) => seekTick(rulerSeekTick(x));
+    const applyPlayheadTime = () => {
+        const seconds = parsePlayheadTime(playheadTime.value);
+        if (seconds === null) {
+            playheadTime.setCustomValidity('Use HH:MM:SS or HH:MM:SS.mmm (minutes and seconds: 00–59).');
+            playheadTime.setAttribute('aria-invalid', 'true');
+            return false;
+        }
+        playheadTime.setCustomValidity('');
+        playheadTime.removeAttribute('aria-invalid');
+        const song = getSeq();
+        if (song) seekTick(song.secondsToTicks(seconds), true);
+        return true;
+    };
+    playheadTime.addEventListener('focus', () => playheadTime.select());
+    playheadTime.addEventListener('input', () => { playheadTime.setCustomValidity(''); playheadTime.removeAttribute('aria-invalid'); });
+    playheadTime.addEventListener('change', () => { if (!applyPlayheadTime()) playheadTime.reportValidity(); });
+    playheadTime.addEventListener('keydown', e => {
+        if (e.key === 'Enter') {
+            e.preventDefault();
+            if (applyPlayheadTime()) { playheadTime.blur(); renderPlayhead(false); }
+            else playheadTime.reportValidity();
+        } else if (e.key === 'Escape') {
+            e.preventDefault();
+            playheadTime.value = formatPlayheadTime(getSeq()?.ticksToSeconds(state.cursorTick) ?? 0);
+            playheadTime.setCustomValidity(''); playheadTime.removeAttribute('aria-invalid');
+            playheadTime.blur();
+        }
+    });
 
     const onRulerDown = (e) => {
         const rect = ruler.getBoundingClientRect();
@@ -898,7 +951,7 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
         if (e.button !== 0) return;
         state.dragMode = 'seek';
         state.seekPointer = e.pointerId;
-        seekTick(xToTick(x), false, false);
+        seekTick(rulerSeekTick(x), false, false);
         e.preventDefault();
     };
 

@@ -1292,3 +1292,7 @@ input, textarea, [contenteditable="true"], .log-box { user-select: text; }
 .automation-plot circle { cursor:grab; stroke:#101624; stroke-width:1; }
 .automation-plot [data-point-status] { position:absolute; right:8px; bottom:8px; background:#101624cc; color:#dfeafa; padding:3px 6px; pointer-events:none; font:11px var(--mono); }
 .automation-tools select,.automation-tools input[type="number"],.automation-tools button { background:#202d40; color:#e1ebf8; border:1px solid #46556c; border-radius:4px; font-size:12px; padding:3px 6px; }
+.arr-playhead-tools { margin-left:auto; display:flex; align-items:center; gap:7px; }
+#arrPlayheadTime { width:14ch; padding:3px 6px; background:var(--bg); color:var(--text); border:1px solid var(--border); border-radius:4px; font:12px var(--mono); font-variant-numeric:tabular-nums; }
+#arrPlayheadTime[aria-invalid="true"] { border-color:#e67878; }
+#arrSnapBars[aria-checked="true"] { background:#194d3d; color:#9af0c3; border-color:#48a979; }
