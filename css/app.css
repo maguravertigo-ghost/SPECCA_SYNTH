@@ -1325,3 +1325,6 @@ input, textarea, [contenteditable="true"], .log-box { user-select: text; }
 .project-library[open] { display:flex; flex-direction:column; }
 .project-library-header,.project-library-intro,.project-library-search,.project-library-status,.project-library .arr-dialog-footer { flex-shrink:0; }
 .project-library-list { flex:1 1 auto; min-height:0; }
+
+.menu-category { padding:6px 12px 3px; color:var(--text-mut); font-size:10px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; user-select:none; }
+.menu[data-menu="file"] > .menu-dropdown { max-height:calc(100dvh - 52px); overflow-y:auto; }

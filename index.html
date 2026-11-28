@@ -10,24 +10,30 @@
 <body>
 
 <header class="menubar">
-    <div class="menubar-logo"><span class="material-icon" aria-hidden="true">piano</span> <span>SPESSA</span><small class="app-version">v1.24.0</small></div>
+    <div class="menubar-logo"><span class="material-icon" aria-hidden="true">piano</span> <span>SPESSA</span><small class="app-version">v1.25.0</small></div>
     <nav class="menubar-menus">
         <div class="menu" data-menu="file">
             <button class="menu-btn" type="button">File</button>
             <div class="menu-dropdown">
+                <div class="menu-category">Project</div>
                 <button data-action="file-new">New Project</button>
+                <button data-action="file-open-project">Open Project…</button>
+                <button data-action="file-save">Save Project…</button>
+                <button data-action="file-project-settings">Project Settings…</button>
+                <div class="menu-sep" role="separator"></div>
+                <div class="menu-category">MIDI</div>
                 <button data-action="file-open">Open MIDI…</button>
+                <button data-action="file-save-as">Save As MIDI…</button>
+                <div class="menu-sep" role="separator"></div>
+                <div class="menu-category">Import</div>
                 <button data-action="file-import-channels">Import MIDI as channels…</button>
                 <button data-action="file-import-nsf">Import NSF as notes…</button>
                 <button data-action="file-import-wav">Import WAV as audio channel…</button>
-                <button data-action="file-open-project">Open Project…</button>
-				<button data-action="file-project-settings">Project Settings…</button>
-                <div class="menu-sep"></div>
-                <button data-action="file-save">Save</button>
-                <button data-action="file-save-as">Save As MIDI…</button>
-                <button data-action="file-save-tracks">Export one MIDI (separate tracks)…</button>
+                <div class="menu-sep" role="separator"></div>
+                <div class="menu-category">Export</div>
+                <button data-action="file-save-tracks" title="One .mid file with a separate MIDI track for each channel">Export MIDI (separate tracks)…</button>
+                <button data-action="file-save-channel-files" title="ZIP archive containing one .mid file per channel">Export MIDI by channel (ZIP)…</button>
                 <button data-action="file-export-wav">Export WAV…</button>
-                <button data-action="file-save-channel-files">Export MIDI by channel (ZIP)…</button>
             </div>
         </div>
         <div class="menu" data-menu="edit">
