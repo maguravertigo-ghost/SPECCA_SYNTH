@@ -15,7 +15,7 @@ function unlock(synth,index) {
 function ready(sequence,channel) {
     const synth=getSynth(), patch=patchFor(channel), actual=synth?.midiChannels[slot]?.patch;
     return synth && getAudioContext()?.state==='running' && configuredSynth===synth && configuredSequence===sequence && configuredMIDI===getSequencer()?.midiData && configured===signatureFor(sequence,channel)
-        && !occupied().includes(slot) && actual && actual.program===(patch.program??0) && actual.bankMSB===(patch.bankMSB??0) && actual.bankLSB===(patch.bankLSB??0) && !!actual.isGMGSDrum===!!patch.isDrum;
+        && !occupied().includes(slot) && actual && actual.program===(patch.program??0) && actual.bankMSB===(patch.bankMSB??0) && actual.bankLSB===(patch.bankLSB??0) && !!actual.isGMGSDrum===!!(patch.isGMGSDrum??patch.isDrum);
 }
 export function prepareManualVoice(sequence, channel) {
     if(ready(sequence,channel))return Promise.resolve({synth:getSynth(),index:slot});
@@ -38,7 +38,7 @@ export function prepareManualVoice(sequence, channel) {
         }
         const patch=patchFor(channel), ch=synth.midiChannels[slot];
         unlock(synth,slot);
-        ch.setDrums(!!patch.isDrum);
+        ch.setDrums(!!(patch.isGMGSDrum??patch.isDrum));
         synth.controllerChange(slot,0,patch.bankMSB??0);synth.controllerChange(slot,32,patch.bankLSB??0);
         synth.programChange(slot,patch.program??0);
         synth.controllerChange(slot,7,127);synth.controllerChange(slot,11,127);synth.controllerChange(slot,10,64);

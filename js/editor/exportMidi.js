@@ -70,7 +70,7 @@ function writeSequence(sequence, clips, { loop = null, respectMute = false, live
         const original = sequence.channels.find(c => c.channel === lane) ?? {};
         const info = original.source === 'chiptune' ? { ...original, ...(liveMix ? chipPatch(original.channel) : { bankMSB: 0, bankLSB: 0, program: original.chip?.wave === 'triangle' ? 38 : original.chip?.wave === 'noise' ? 119 : 80, isDrum: false }) } : original;
         if (sequence.effects) for (const [id,spec] of Object.entries(EFFECTS)) emit(0, -1, [0xb0 | ch, spec.cc, effectSend(info,id)], part);
-        const isDrum = info.isDrum ?? (ch === 9);
+        const isDrum = info.isGMGSDrum ?? info.isDrum ?? (ch === 9);
         if (isDrum !== (ch === 9)) sysex(gsMessage(0x10 | gsPart(ch), 0x15, isDrum ? 1 : 0), -5, part);
         emit(0, -4, [0xb0 | ch, 0, (info.bankMSB ?? 0) & 0x7f], part);
         emit(0, -3, [0xb0 | ch, 32, (info.bankLSB ?? 0) & 0x7f], part);

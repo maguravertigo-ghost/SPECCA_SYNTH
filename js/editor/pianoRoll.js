@@ -1,3 +1,4 @@
+import {openDrumSequencer} from '../ui/drumSequencer.js';
 import {prepareAudio,createAudioFollower} from '../core/audioTracks.js';
 import {getAudioContext,getAudioOutput} from '../core/synth.js';
 import { openChipSynth } from '../ui/chipSynthDialog.js';
@@ -75,6 +76,7 @@ export function mountPianoRoll(rootEl, opts = {}) {
                 <button id="prAudioEffects" class="pr-t-btn" type="button" title="Shared audio effect parameters">Audio FX…</button>
                 <button id="prEffects" class="pr-t-btn" type="button" aria-pressed="false">Automation</button>
                 <button id="prGenerate" class="pr-t-btn" type="button" title="Generate notes for this pattern"><span class="material-icon" aria-hidden="true">auto_awesome</span> Generate</button>
+                <button id="prDrumSequencer" class="pr-t-btn" type="button" hidden title="Build a drum loop in a step matrix">Drum sequencer…</button>
                 <button id="prFixNotes" class="pr-t-btn" type="button" title="Correct out-of-scale pitches">FIX</button>
             </div>
             <div class="pr-toolbar">
@@ -1076,6 +1078,8 @@ export function mountPianoRoll(rootEl, opts = {}) {
         $('#prEffects').hidden = comment;
         $('#prGenerate').hidden = comment;
         $('#prGenerate').disabled = !pattern;
+        $('#prDrumSequencer').hidden = comment || !channel?.isDrum;
+        $('#prDrumSequencer').disabled = !pattern;
         $('#prFixNotes').hidden = comment || !!channel?.isDrum;
         $('#prFixNotes').disabled = !pattern;
         patternSelect.replaceChildren(...patterns.map(p => new Option(p.name, p.id)));
@@ -1133,6 +1137,22 @@ export function mountPianoRoll(rootEl, opts = {}) {
             scheduleHotReload(); onEdit?.();
         }
         $('#prEditStatus').textContent = added.length ? `Generated ${added.length} notes in ${pattern.name}` : 'No new notes: the generated notes overlap existing notes.';
+    });
+    $('#prDrumSequencer').addEventListener('click',async()=>{
+        const sequence=getSeq(),pattern=getPattern(),channel=getChannelInfo();
+        if(!pattern||!channel?.isDrum)return;
+        stop(false);
+        const result=await openDrumSequencer({sequence,pattern,channel,
+            onAudition:(patch,key,vel,isCurrent)=>startManualVoice(sequence,{...channel,...patch},key,vel,isCurrent),
+            onSilence:silenceManualVoices});
+        if(!result||getSeq()!==sequence||getPattern()!==pattern||getChannelInfo()!==channel)return;
+        if(result.replace)pattern.notes=[];
+        pattern.lengthTicks=result.replace?result.lengthTicks:Math.max(pattern.lengthTicks,result.lengthTicks);
+        Object.assign(channel,result.patch);
+        const added=withoutNoteConflicts(result.notes,pattern.notes).map(n=>sequence.addNote(pattern.id,{...n,track:channel.channel}));
+        refreshHeader();resetViewport();state.selection=new Set(added);
+        scheduleHotReload();onInstrumentChange?.();onEdit?.();
+        $('#prEditStatus').textContent=`Drum sequencer: sent ${added.length} notes · Undo to restore`;
     });
     $('#prFixNotes').addEventListener('click', async () => {
         const seq = getSeq(), pattern = getPattern(), channel = getChannelInfo();

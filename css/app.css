@@ -1350,3 +1350,24 @@ input, textarea, [contenteditable="true"], .log-box { user-select: text; }
 .tempo-point-dialog { width:min(440px,92vw); }
 .tempo-point-dialog [data-position] { color:var(--text-mut); font-size:12px; }
 .arr-tempo-heading [data-tempo-current] { font:10px var(--mono); color:#d3c286; }
+.drum-sequencer { width:min(1120px,96vw); max-height:90vh; padding:0; }
+.drum-sequencer[open] { display:flex; flex-direction:column; }
+.drum-controls { display:flex; flex-wrap:wrap; gap:10px; align-items:center; padding:10px 14px; flex-shrink:0; }
+.drum-controls label { display:flex; gap:6px; align-items:center; font-size:12px; }
+.drum-controls input { width:60px; }
+.drum-controls [data-kit] { max-width:300px; }
+.drum-controls input,.drum-controls select,.drum-row-label input { background:var(--bg); color:var(--text); border:1px solid var(--border); padding:4px; border-radius:4px; }
+.drum-matrix { overflow:auto; min-height:100px; flex:1; padding:8px 0; background:#14151b; }
+.drum-row { display:grid; grid-template-columns:210px repeat(var(--drum-steps),26px); gap:3px; padding:3px 12px; width:max-content; min-width:100%; box-sizing:border-box; }
+.drum-row-label { position:sticky; left:0; display:flex; align-items:center; gap:5px; background:#14151b; z-index:2; }
+.drum-row-label .btn { width:150px; text-align:left; font-size:11px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.drum-row-label input { width:45px; font-size:11px; }
+.drum-step { width:26px; height:28px; border:1px solid #393d49; background:#282a33; border-radius:4px; cursor:pointer; }
+.drum-step.is-beat { background:#343744; }
+.drum-step.is-bar { border-left:2px solid #a2a8c0; }
+.drum-step[aria-pressed="true"] { background:#ed9861; border-color:#ffd1a4; }
+.drum-step.is-playing { outline:2px solid #f5eeae; outline-offset:0; }
+.drum-help { padding:0 14px; font-size:11px; flex-shrink:0; }
+.drum-sequencer .arr-dialog-footer { flex-shrink:0; }
+.drum-step-header { position:sticky; top:0; z-index:3; background:#14151b; font:10px var(--mono); color:var(--text-mut); text-align:center; }
+.drum-step-header .drum-row-label { text-align:left; }

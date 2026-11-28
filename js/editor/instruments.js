@@ -13,20 +13,20 @@ export function instrumentFamily({ program = 0, isDrum = false } = {}) {
 }
 
 export function instrumentCatalog(presets = []) {
-    // The GS MIDI writer supports the SoundFont's GM/GS drum kits.
-    const supported = presets.filter(p => !p.isDrum || p.isGMGSDrum);
+    // Keep every selectable SoundFont patch, including bank-addressed XG/GM2 kits.
+    const supported = presets;
     const melodic = supported.filter(p => !p.isDrum);
     const kits = supported.filter(p => p.isDrum);
     return [
-        ...(melodic.length ? melodic : Array.from({ length: 128 }, (_, program) => ({
+        ...(presets.length ? melodic : Array.from({ length: 128 }, (_, program) => ({
             name: `${instrumentFamily({ program })} ${program % 8 + 1}`, program, isDrum: false,
         }))),
-        ...(kits.length ? kits : FALLBACK_KITS.map(([program, name]) => ({ name, program, isDrum: true }))),
-    ].map(({ name, program, isDrum, bankMSB = 0, bankLSB = 0 }) => ({ name, program, isDrum, bankMSB, bankLSB }));
+        ...(presets.length ? kits : FALLBACK_KITS.map(([program, name]) => ({ name, program, isDrum: true }))),
+    ].map(({ name, program, isDrum, isGMGSDrum = !!isDrum, bankMSB = 0, bankLSB = 0 }) => ({ name, program, isDrum, isGMGSDrum, bankMSB, bankLSB }));
 }
 
 export function sameInstrument(a, b) {
-    return (a?.program ?? 0) === (b?.program ?? 0) && !!a?.isDrum === !!b?.isDrum &&
+    return (a?.program ?? 0) === (b?.program ?? 0) && !!(a?.isGMGSDrum ?? a?.isDrum) === !!(b?.isGMGSDrum ?? b?.isDrum) &&
         (a?.bankMSB ?? 0) === (b?.bankMSB ?? 0) && (a?.bankLSB ?? 0) === (b?.bankLSB ?? 0);
 }
 
@@ -40,10 +40,12 @@ export function instrumentLabel(channel, catalog) {
 // bank before substituting a different sound, and never turn a drum kit into a piano.
 export function adaptToSoundfont(sequence, presets) {
     if (!presets?.length) return 0;
-    const list = presets.filter(p => !p.isDrum || p.isGMGSDrum);
+    const list = presets;
     let substitutions = 0;
     for (const channel of sequence.channels) {
-        if (channel.source === 'chiptune' || channel.kind === 'comment' || channel.kind === 'audio' || channel.created === false || list.some(p => sameInstrument(p, channel))) continue;
+        if (channel.source === 'chiptune' || channel.kind === 'comment' || channel.kind === 'audio' || channel.created === false) continue;
+        const exact = list.find(p => sameInstrument(p, channel));
+        if (exact) { channel.isDrum = !!exact.isDrum; channel.isGMGSDrum = exact.isGMGSDrum ?? !!exact.isDrum; continue; }
         const candidates = list.filter(p => !!p.isDrum === !!channel.isDrum);
         const fallback = candidates.find(p => p.program === channel.program && !p.bankMSB && !p.bankLSB)
             ?? candidates.find(p => p.program === channel.program)
@@ -52,7 +54,7 @@ export function adaptToSoundfont(sequence, presets) {
         if (!fallback) continue;
         channel.sourcePatch ??= { program: channel.program, bankMSB: channel.bankMSB, bankLSB: channel.bankLSB };
         Object.assign(channel, { program: fallback.program, bankMSB: fallback.bankMSB ?? 0,
-            bankLSB: fallback.bankLSB ?? 0, presetName: fallback.name });
+            bankLSB: fallback.bankLSB ?? 0, isGMGSDrum:fallback.isGMGSDrum ?? !!fallback.isDrum, presetName: fallback.name });
         substitutions++;
     }
     return substitutions;

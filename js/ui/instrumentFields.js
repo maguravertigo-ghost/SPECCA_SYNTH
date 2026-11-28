@@ -2,7 +2,7 @@ import { CHIP_PRESETS, chipSettings } from '../editor/chiptune.js';
 import { getSynth } from '../core/synth.js';
 import { instrumentCatalog, instrumentFamily, instrumentLabel, sameInstrument } from '../editor/instruments.js';
 
-export const getInstrumentCatalog = () => instrumentCatalog(getSynth()?.presetList?.filter(p => !/^Chip \d+$/.test(p.name)));
+export const getInstrumentCatalog = () => instrumentCatalog(getSynth()?.presetList?.filter(p => !(/^Chip \d+$/.test(p.name) && p.bankMSB>=100 && p.bankMSB<=115)));
 export const getInstrumentLabel = (channel) => instrumentLabel(channel, getInstrumentCatalog());
 
 // Shared by the Piano Roll picker and the Arranger channel dialog.
@@ -16,6 +16,8 @@ export function mountInstrumentFields(root, current = {}, { allowComment = false
         <label class="arr-field" data-family-row><span>Class</span><select data-family></select></label>
         <label class="arr-field" data-preset-row><span data-preset-label>Preset</span><select data-preset></select></label>
     `;
+    const searchRow=document.createElement('label');searchRow.className='arr-field';searchRow.innerHTML='<span>Search presets (all banks / classes)</span><input type="search" data-preset-search placeholder="Name or program number…">';root.querySelector('[data-bank-row]').before(searchRow);
+    const search=searchRow.querySelector('input');
     const chipPanel = document.createElement('div');
     chipPanel.dataset.chipPanel='';
     chipPanel.innerHTML=`<label class="arr-field"><span>Chip preset</span><select data-chip-preset></select></label>
@@ -46,19 +48,19 @@ export function mountInstrumentFields(root, current = {}, { allowComment = false
     const bankKey = p => `${p.bankMSB ?? 0}:${p.bankLSB ?? 0}`;
     const family = root.querySelector('[data-family]');
     const preset = root.querySelector('[data-preset]');
-    const catalog = getInstrumentCatalog().filter(p => !/^Chip \d+$/.test(p.name));
+    const catalog = getInstrumentCatalog().filter(p => !(/^Chip \d+$/.test(p.name) && p.bankMSB>=100 && p.bankMSB<=115));
     if (!catalog.some(p => sameInstrument(p, current))) {
         catalog.push({ ...current, name: instrumentLabel(current, catalog) });
     }
     category.value = allowComment && current.kind === 'comment' ? 'comment' : current.source === 'chiptune' ? 'chip' : current.isDrum ? 'drums' : 'melodic';
     let choices = [];
-    const available = () => catalog.filter(p => !!p.isDrum === (category.value === 'drums') && (!bank.value || bankKey(p) === bank.value));
+    const available = () => catalog.filter(p => !!p.isDrum === (category.value === 'drums') && (search.value.trim() || !bank.value || bankKey(p) === bank.value));
     const refreshPresets = (selected) => {
         const drums = category.value === 'drums';
-        choices = available().filter(p => drums || instrumentFamily(p) === family.value)
+        choices = available().filter(p => drums || !family.value || search.value.trim() || instrumentFamily(p) === family.value).filter(p=>!search.value.trim()||`${p.name} ${p.program+1}`.toLowerCase().includes(search.value.trim().toLowerCase()))
             .sort((a, b) => a.program - b.program || (a.bankMSB ?? 0) - (b.bankMSB ?? 0) || (a.bankLSB ?? 0) - (b.bankLSB ?? 0));
         preset.replaceChildren(...choices.map((p, i) => new Option(
-            `${p.name}${p.bankMSB || p.bankLSB ? ` · bank ${p.bankMSB ?? 0}:${p.bankLSB ?? 0}` : ''}`, i,
+            `${p.name} · #${p.program+1}${p.bankMSB || p.bankLSB ? ` · bank ${p.bankMSB ?? 0}:${p.bankLSB ?? 0}` : ''}`, i,
         )));
         const index = choices.findIndex(p => selected && sameInstrument(p, selected));
         if (index >= 0) preset.value = index;
@@ -67,7 +69,7 @@ export function mountInstrumentFields(root, current = {}, { allowComment = false
         const drums = category.value === 'drums';
         root.querySelector('[data-family-row]').hidden = drums || category.value === 'comment';
         root.querySelector('[data-preset-label]').textContent = drums ? 'Kit' : 'Preset';
-        family.replaceChildren(...[...new Set(available().filter(p => !p.isDrum).map(instrumentFamily))]
+        family.replaceChildren(new Option('All classes',''),...[...new Set(available().filter(p => !p.isDrum).map(instrumentFamily))]
             .map(name => new Option(name, name)));
         if (selected && !selected.isDrum && [...family.options].some(o => o.value === instrumentFamily(selected))) family.value = instrumentFamily(selected);
         refreshPresets(selected);
@@ -81,9 +83,11 @@ export function mountInstrumentFields(root, current = {}, { allowComment = false
         if (selected && keys.includes(bankKey(selected))) bank.value = bankKey(selected);
         refreshFamilies(selected);
         chipPanel.hidden = category.value !== 'chip';
+        searchRow.hidden=['chip','comment'].includes(category.value);
         if (category.value === 'chip') for(const row of root.querySelectorAll('[data-bank-row],[data-family-row],[data-preset-row]')) row.hidden=true;
     };
-    category.addEventListener('change', () => refreshBanks());
+    search.addEventListener('input',()=>refreshPresets());
+    category.addEventListener('change', () => {search.value='';refreshBanks();});
     bank.addEventListener('change', () => refreshFamilies());
     family.addEventListener('change', () => refreshPresets());
     refreshBanks(current);
@@ -92,10 +96,10 @@ export function mountInstrumentFields(root, current = {}, { allowComment = false
         if (category.value === 'chip') {
             const chip={...chipConfig,name:chipName};
             for(const id of ['wave','duty','attack','decay','sustain','release']) { const value=root.querySelector(`[data-chip-${id}]`).value; chip[id]=id==='wave'?value:Number(value); }
-            return {source:'chiptune',chip:chipSettings(chip),isDrum:false,program:current.program??80,bankMSB:current.bankMSB??0,bankLSB:current.bankLSB??0,kind:'instrument'};
+            return {source:'chiptune',chip:chipSettings(chip),isDrum:false,isGMGSDrum:false,program:current.program??80,bankMSB:current.bankMSB??0,bankLSB:current.bankLSB??0,kind:'instrument'};
         }
         const p = choices[preset.selectedIndex];
-        return p && { source: 'soundfont', chip: null, program: p.program ?? 0, isDrum: !!p.isDrum, bankMSB: p.bankMSB ?? 0,
+        return p && { source: 'soundfont', chip: null, program: p.program ?? 0, isDrum: !!p.isDrum, isGMGSDrum:p.isGMGSDrum ?? !!p.isDrum, bankMSB: p.bankMSB ?? 0,
             bankLSB: p.bankLSB ?? 0, presetName: p.name, ...(allowComment ? { kind: 'instrument' } : {}) };
     };
     read.category = category;
