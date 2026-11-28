@@ -1371,3 +1371,26 @@ input, textarea, [contenteditable="true"], .log-box { user-select: text; }
 .drum-sequencer .arr-dialog-footer { flex-shrink:0; }
 .drum-step-header { position:sticky; top:0; z-index:3; background:#14151b; font:10px var(--mono); color:var(--text-mut); text-align:center; }
 .drum-step-header .drum-row-label { text-align:left; }
+/* Dragging and double-clicking editor controls should never select interface text. */
+html,body,body * { -webkit-user-select:none; user-select:none; }
+input,textarea,[contenteditable="true"],[contenteditable=""],[contenteditable="plaintext-only"],[contenteditable="true"] * { -webkit-user-select:text; user-select:text; }
+.drum-sequencer { width:98vw; max-width:1800px; height:90vh; max-height:94vh; }
+.drum-row { grid-template-columns:420px repeat(var(--drum-steps),28px); }
+.drum-row-label { gap:5px; }
+.drum-row-label .btn:first-child { width:220px; }
+.drum-row-label .drum-row-mute { width:32px; padding:4px; }
+.drum-row-label select { width:92px; background:var(--bg); color:var(--text); border:1px solid var(--border); }
+.drum-controls [data-kit] { max-width:520px; }
+.drum-controls [data-note] { max-width:440px; }
+.drum-controls [data-sound-search] { width:150px; }
+.drum-controls [data-all-keys] { width:auto; }
+.drum-row.is-unmapped .drum-row-label > button:first-child { color:#eeb28e; }
+.drum-controls [data-sound-status] { font-size:11px; color:var(--text-mut); }
+.drum-row-mute[aria-pressed="true"] { background:#555; color:#aaa; }
+.preset-number-help { font-size:11px; line-height:1.5; }
+@media(max-width:800px) { .drum-row { grid-template-columns:280px repeat(var(--drum-steps),28px); } .drum-row-label .btn:first-child { width:120px; } .drum-row-label select { width:72px; } .drum-controls [data-kit],.drum-controls [data-note] { max-width:260px; } }
+body .log-box { -webkit-user-select:none; user-select:none; }
+[contenteditable=""] *,[contenteditable="plaintext-only"] * { -webkit-user-select:text; user-select:text; }
+.arr-field select { min-width:0; max-width:100%; }
+.pr-instrument-dialog { width:min(740px,94vw); max-height:90vh; overflow-y:auto; }
+[data-preset-search] { min-width:0; max-width:100%; }

@@ -12,12 +12,13 @@ export function mountInstrumentFields(root, current = {}, { allowComment = false
             <option value="chip">Chiptune Synth</option><option value="melodic">SoundFont instruments</option><option value="drums">Drums</option>
             ${allowComment ? '<option value="comment">Comment</option>' : ''}
         </select></label>
-        <label class="arr-field" data-bank-row><span>Bank (MSB:LSB)</span><select data-bank></select></label>
+        <label class="arr-field" data-bank-row><span>Bank / variation</span><select data-bank></select></label>
         <label class="arr-field" data-family-row><span>Class</span><select data-family></select></label>
         <label class="arr-field" data-preset-row><span data-preset-label>Preset</span><select data-preset></select></label>
     `;
     const searchRow=document.createElement('label');searchRow.className='arr-field';searchRow.innerHTML='<span>Search presets (all banks / classes)</span><input type="search" data-preset-search placeholder="Name or program number…">';root.querySelector('[data-bank-row]').before(searchRow);
     const search=searchRow.querySelector('input');
+    const help=document.createElement('p');help.className='muted preset-number-help';help.textContent='Choose the preset by name. Program 1–128 is the instrument number (MIDI stores 0–127). Bank MSB:LSB selects a variation, not the program. Gaps mean this SoundFont has no preset at that address. All banks / All classes show the full category.';root.append(help);
     const chipPanel = document.createElement('div');
     chipPanel.dataset.chipPanel='';
     chipPanel.innerHTML=`<label class="arr-field"><span>Chip preset</span><select data-chip-preset></select></label>
@@ -60,10 +61,11 @@ export function mountInstrumentFields(root, current = {}, { allowComment = false
         choices = available().filter(p => drums || !family.value || search.value.trim() || instrumentFamily(p) === family.value).filter(p=>!search.value.trim()||`${p.name} ${p.program+1}`.toLowerCase().includes(search.value.trim().toLowerCase()))
             .sort((a, b) => a.program - b.program || (a.bankMSB ?? 0) - (b.bankMSB ?? 0) || (a.bankLSB ?? 0) - (b.bankLSB ?? 0));
         preset.replaceChildren(...choices.map((p, i) => new Option(
-            `${p.name} · #${p.program+1}${p.bankMSB || p.bankLSB ? ` · bank ${p.bankMSB ?? 0}:${p.bankLSB ?? 0}` : ''}`, i,
+            `${p.name} · Program ${p.program+1} (MIDI ${p.program}) · Bank ${p.bankMSB??0}:${p.bankLSB??0}`, i,
         )));
         const index = choices.findIndex(p => selected && sameInstrument(p, selected));
         if (index >= 0) preset.value = index;
+        preset.title=preset.selectedOptions[0]?.textContent??'';
     };
     const refreshFamilies = (selected) => {
         const drums = category.value === 'drums';
@@ -71,21 +73,23 @@ export function mountInstrumentFields(root, current = {}, { allowComment = false
         root.querySelector('[data-preset-label]').textContent = drums ? 'Kit' : 'Preset';
         family.replaceChildren(new Option('All classes',''),...[...new Set(available().filter(p => !p.isDrum).map(instrumentFamily))]
             .map(name => new Option(name, name)));
-        if (selected && !selected.isDrum && [...family.options].some(o => o.value === instrumentFamily(selected))) family.value = instrumentFamily(selected);
+        family.value='';
         refreshPresets(selected);
     };
     const refreshBanks = selected => {
         const keys = [...new Set(catalog.filter(p => !!p.isDrum === (category.value === 'drums')).map(bankKey))]
             .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
-        bank.replaceChildren(new Option('All banks', ''), ...keys.map(key => new Option(key, key)));
+        bank.replaceChildren(new Option('All banks', ''), ...keys.map(key => new Option(`Bank ${key} · ${catalog.filter(p=>bankKey(p)===key&&!!p.isDrum===(category.value==='drums')).length} presets`, key)));
         root.querySelector('[data-bank-row]').hidden = category.value === 'comment' || keys.length < 2;
         root.querySelector('[data-preset-row]').hidden = category.value === 'comment';
-        if (selected && keys.includes(bankKey(selected))) bank.value = bankKey(selected);
+        bank.value='';
         refreshFamilies(selected);
         chipPanel.hidden = category.value !== 'chip';
         searchRow.hidden=['chip','comment'].includes(category.value);
+        help.hidden=searchRow.hidden;
         if (category.value === 'chip') for(const row of root.querySelectorAll('[data-bank-row],[data-family-row],[data-preset-row]')) row.hidden=true;
     };
+    preset.addEventListener('change',()=>{preset.title=preset.selectedOptions[0]?.textContent??'';});
     search.addEventListener('input',()=>refreshPresets());
     category.addEventListener('change', () => {search.value='';refreshBanks();});
     bank.addEventListener('change', () => refreshFamilies());

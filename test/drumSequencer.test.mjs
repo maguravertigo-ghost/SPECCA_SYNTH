@@ -20,3 +20,7 @@ test('all selectable banks including XG kits stay selectable, keep exact wire dr
  const imported=importMidi(writeArrangementMIDI(s));const ch=imported.channels.find(c=>c.created);assert.equal(ch.bankMSB,127);assert.equal(ch.program,4);
  assert.equal(adaptToSoundfont(imported,presets),0);assert.equal(ch.isDrum,true);assert.equal(ch.isGMGSDrum,false);assert.ok(sameInstrument(ch,catalog[1]));assert.equal(ch.sourcePatch,undefined);
 });
+
+test('muted sequencer rows are not sent as notes',()=>{
+ assert.deepEqual(drumMatrixNotes([{key:36,muted:true,steps:new Set([0])}]),[]);
+});

@@ -6,4 +6,5 @@ export {
 
 export {
     BasicMIDI,
+    SoundBankLoader,
 } from 'spessasynth_core';

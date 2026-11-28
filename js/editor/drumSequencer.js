@@ -1,7 +1,7 @@
 export const DRUM_ROWS = [[36,'Kick'],[38,'Snare'],[42,'Closed hat'],[46,'Open hat'],[39,'Clap'],[45,'Low tom'],[49,'Crash'],[51,'Ride']];
 export function drumMatrixNotes(rows,{bars=1,ticksPerBar=1920,timeDivision=480,division=16}={}) {
     const quantum=timeDivision*4/division,lengthTicks=Math.round(bars*ticksPerBar),notes=[];
-    for(const row of rows)for(const step of row.steps) {
+    for(const row of rows.filter(r=>!r.muted))for(const step of row.steps) {
         const tick=Math.round(step*quantum);
         if(!Number.isInteger(step)||step<0||tick>=lengthTicks||row.key<0||row.key>127)continue;
         notes.push({key:row.key,tick,dur:Math.max(1,Math.min(Math.round(quantum*.5),lengthTicks-tick)),vel:Math.max(1,Math.min(127,Math.round(row.velocity??100)))});

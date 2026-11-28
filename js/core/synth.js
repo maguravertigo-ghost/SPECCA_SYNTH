@@ -384,3 +384,6 @@ export async function exportSoundBanks(sequence) {
     if (chip) banks.push({bankOffset:0,soundBankBuffer:chip});
     return banks;
 }
+
+// Immutable source Blob identity also invalidates lazily built preset metadata.
+export const getInstalledSoundFont = () => installedFont;

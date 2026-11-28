@@ -2,7 +2,7 @@ import { initSynth, getSynth, getAudioContext, getSequencer, getPreviewSequencer
 import { chipPatch } from '../editor/chiptune.js';
 import { EFFECTS, effectSend } from '../editor/audioEffects.js';
 let slot=null, queue=Promise.resolve(), configured=null, configuredSynth=null, configuredSequence=null, configuredMIDI=null;
-const protectedCCs=[7,10,11,91,93,94];
+const protectedCCs=[0,32,7,10,11,91,93,94];
 const occupied=()=>[...getMidiMixChannels(getSequencer()),...getMidiMixChannels(getPreviewSequencer())].map(c=>c.index);
 const patchFor=channel=>channel.source==='chiptune'?chipPatch(channel.channel):channel;
 const signatureFor=(sequence,channel)=>JSON.stringify({slot,channel,effects:sequence.effects});
@@ -38,17 +38,24 @@ export function prepareManualVoice(sequence, channel) {
         }
         const patch=patchFor(channel), ch=synth.midiChannels[slot];
         unlock(synth,slot);
+        applyProjectEffects(sequence);
+        // setDrums() compares the semantic drum flag, not the wire addressing flag.
+        // XG raw-bank kits also set that flag, so a direct true→true switch can
+        // leave isGMGSDrum false and select a piano/default kit. Normalize first.
+        ch.setDrums(false);
+        synth.controllerChange(slot,0,0);synth.controllerChange(slot,32,0);synth.programChange(slot,0);
         ch.setDrums(!!(patch.isGMGSDrum??patch.isDrum));
         synth.controllerChange(slot,0,patch.bankMSB??0);synth.controllerChange(slot,32,patch.bankLSB??0);
         synth.programChange(slot,patch.program??0);
         synth.controllerChange(slot,7,127);synth.controllerChange(slot,11,127);synth.controllerChange(slot,10,64);
         applyLiveMix(slot,channel);
-        applyProjectEffects(sequence);
         for(const [id,spec] of Object.entries(EFFECTS)) synth.controllerChange(slot,spec.cc,effectSend(channel,id));
         // Loop/seek GS resets must not replace the independent live keyboard patch
         // with program 0 or reset its expression/sends. Unlock before a song load.
         ch.setSystemParameter('presetLock',true);
         for(const cc of protectedCCs)ch.lockController(cc,true);
+        // Drain asynchronous patch/controller events before the first attack or next setup.
+        await synth.getSnapshot();
         configuredSynth=synth;configuredSequence=sequence;configuredMIDI=getSequencer()?.midiData;configured=signatureFor(sequence,channel);
         return {synth,index:slot};
     });
