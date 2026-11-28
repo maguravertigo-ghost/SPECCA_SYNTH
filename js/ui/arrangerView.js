@@ -74,7 +74,7 @@ export function mountArranger(rootEl, { getSequence, getChannelPattern, onSelect
                 </div>
             </div>
             <div class="arr-marker-tools"><input type="file" accept=".wav,audio/wav" id="arrWavFile" hidden><span>Time markers</span><button class="btn" type="button" id="arrAddMarker">+ At playhead</button><button class="btn" type="button" id="arrPrevMarker" aria-label="Previous marker">◀</button><button class="btn" type="button" id="arrNextMarker" aria-label="Next marker">▶</button><button class="btn" type="button" id="arrEditMarker">Edit…</button><button class="btn" type="button" id="arrDeleteMarker">Delete</button><div class="arr-playhead-tools"><label for="arrPlayheadTime">Playhead</label><input id="arrPlayheadTime" type="text" value="00:00:00" placeholder="00:00:00" aria-label="Playhead timecode" title="Hours:minutes:seconds (optional .milliseconds). Enter or leave field to seek; Esc to cancel." spellcheck="false" autocomplete="off"><button class="btn" type="button" id="arrSnapBars" role="switch" aria-checked="false" title="Snap playhead on the ruler to the nearest bar start: B1, B2, B3… (timecode stays exact)">Snap bars: OFF</button></div></div><div class="arr-marker-strip" id="arrMarkerStrip" aria-label="Time markers"><div id="arrMarkerLabels"></div></div>
-            <div class="arr-edit-hint">Channel name: edit notes <span>•</span> Grid: draw <span>•</span> Drag: move <span>•</span> Right click: erase</div>
+
         </div>
     `;
 

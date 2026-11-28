@@ -10,7 +10,7 @@
 <body>
 
 <header class="menubar">
-    <div class="menubar-logo"><span class="material-icon" aria-hidden="true">piano</span> <span>SPESSA</span><small class="app-version">v1.22.0</small></div>
+    <div class="menubar-logo"><span class="material-icon" aria-hidden="true">piano</span> <span>SPESSA</span><small class="app-version">v1.23.0</small></div>
     <nav class="menubar-menus">
         <div class="menu" data-menu="file">
             <button class="menu-btn" type="button">File</button>
@@ -84,7 +84,6 @@
         <button class="btn audio-enable" data-local-soundfont type="button" title="Choose or switch SoundFont">SoundFont…</button>
         <progress data-font-progress class="font-progress" aria-label="SoundFont download progress" hidden></progress>
         <span id="audioState" class="audio-state" role="status">Audio off · press Play</span>
-        <span id="status" class="app-status"></span>
     </div>
 </header>
 
@@ -92,6 +91,8 @@
     <div id="arrangerRoot" class="arranger-root"></div>
     <div id="editorRoot" class="editor-root" style="display:none"></div>
 </div>
+
+<div class="arr-edit-hint"><div class="arr-hint-text">Channel name: edit notes <span>•</span> Grid: draw <span>•</span> Drag: move <span>•</span> Right click: erase</div><span id="status" class="app-status"></span><strong id="arrProjectName" class="arr-project-name" aria-label="Composition name">Untitled</strong></div>
 
 <section id="logPanel" class="log-panel collapsed">
     <div class="log-header">

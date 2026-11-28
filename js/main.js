@@ -1,3 +1,5 @@
+import {readProjectLibrary,writeProjectLibrary} from './editor/projectLibrary.js';
+import {openProjectLibrary} from './ui/projectLibrary.js';
 import {importWav} from './core/audioTracks.js';
 import {chooseNsfImport} from './ui/importNsfDialog.js';
 import {appendNsfTrace} from './editor/nsf.js';
@@ -57,6 +59,7 @@ const playlist = new Playlist();
 let pianoRoll = null;
 let currentSequence = null;
 let savedSnapshot = null;
+let currentSavedKey = null;
 const history = createEditHistory();
 let menubar;
 const syncHistory = () => {
@@ -109,7 +112,13 @@ const createEmptySequence = () => new Sequence({
     channels: [{ channel: 9, name: 'Drums', program: 0, isDrum: true, volume: 100, pan: 64, muted: false }],
 });
 
+function refreshProjectName() {
+    const label = document.getElementById('arrProjectName');
+    if (label) label.textContent = label.title = currentSequence?.name || 'Untitled';
+}
+
 function refreshProjectTempo() {
+    refreshProjectName();
     const output = document.getElementById('projectBpm');
     const tempo = currentSequence?.tempo;
     output.value = Number.isFinite(tempo) ? String(Number(tempo.toFixed(2))) : '–';
@@ -149,6 +158,7 @@ function useSequence(sequence, name = null, { keepHistory = false } = {}) {
     pianoRoll?.stop();
     arrangerView?.stop();
     currentSequence = sequence;
+    currentSavedKey = null;
     if (name) sequence.name = name;
     refreshProjectTempo();
     const snapshot = sequence.toJSON(0);
@@ -287,12 +297,8 @@ if (arrangerRoot) {
 useSequence(createEmptySequence());
 
 // ---------------- Local project save/load ----------------
-const STORAGE_KEY = 'spessa_projects_v1';
-const readProjects = () => {
-    try { return JSON.parse(localStorage.getItem(STORAGE_KEY)) || {}; }
-    catch { return {}; }
-};
-const writeProjects = (obj) => localStorage.setItem(STORAGE_KEY, JSON.stringify(obj));
+const readProjects = readProjectLibrary;
+const writeProjects = writeProjectLibrary;
 
 const saveProjectToLocal = async () => {
     const seq = currentSequence;
@@ -307,6 +313,9 @@ const saveProjectToLocal = async () => {
     try { writeProjects({ ...projects, [name]: entry }); }
     catch (error) { log(`Save failed: ${error}`, 'error'); setStatus('Could not save project'); return; }
     seq.name = name;
+    refreshProjectName();
+    currentSavedKey = name;
+    arrangerView?.refresh();
     savedSnapshot = seq.toJSON(0);
     commitEdit();
     log(`main: project saved "${name}"`);
@@ -314,45 +323,32 @@ const saveProjectToLocal = async () => {
     return true;
 };
 
-const openProjectDialog = () => {
-    const projects = readProjects();
-    const names = Object.keys(projects);
-    if (!names.length) { log('Open: no saved projects', 'warn'); return; }
-
-    const overlay = document.createElement('div');
-    overlay.className = 'pr-picker-overlay';
-    overlay.innerHTML = `
-        <div class="pr-picker-box">
-            <div class="pr-picker-title">Open Project</div>
-            <div class="pr-picker-list" id="projList"></div>
-            <button class="btn btn-primary pr-picker-close" id="projCancel" type="button">Cancel</button>
-        </div>
-    `;
-    document.body.appendChild(overlay);
-    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
-    overlay.querySelector('#projCancel').addEventListener('click', () => overlay.remove());
-
-    const list = overlay.querySelector('#projList');
-    names.forEach((n) => {
-        const item = document.createElement('button');
-        item.type = 'button';
-        item.className = 'pr-picker-item';
-        item.textContent = n;
-        item.addEventListener('click', () => {
-            try {
-                useSequence(Sequence.fromJSON(projects[n].seq), n);
-            } catch (err) {
-                log(`Open project failed: ${err}`, 'error');
-                setStatus('Load failed');
-                return;
-            }
-            overlay.remove();
-            log(`main: project loaded "${n}"`);
-            setStatus(`Loaded: ${n}`);
-        });
-        list.appendChild(item);
-    });
-};
+const openProjectDialog = () => openProjectLibrary({
+    onOpen: async name => {
+        const previous = currentSequence;
+        if (previous && previous.toJSON(0) !== savedSnapshot) {
+            const action = await askUnsavedChanges('opening another project');
+            if (action === 'cancel' || currentSequence !== previous) return false;
+            if (action === 'save' && !await saveProjectToLocal()) return false;
+        }
+        if (currentSequence !== previous) return false;
+        const entry = readProjects()[name];
+        if (!entry) throw new Error('This saved project no longer exists.');
+        useSequence(Sequence.fromJSON(entry.seq), name);
+        currentSavedKey = name;
+        log(`main: project loaded "${name}"`); setStatus(`Loaded: ${name}`);
+        return true;
+    },
+    onRename: (oldName, newName) => {
+        if (currentSavedKey !== oldName || !currentSequence) return;
+        currentSavedKey = newName;
+        currentSequence.name = newName;
+        if (savedSnapshot) { const saved = JSON.parse(savedSnapshot); saved.name = newName; savedSnapshot = JSON.stringify(saved); }
+        // Only rename the working copy: do not replace unsaved notes with the stored snapshot.
+        commitEdit(); refreshAll();
+    },
+    onDelete: name => { if (currentSavedKey === name) currentSavedKey = null; },
+});
 
 async function generateProject(type) {
     const previous = currentSequence;
